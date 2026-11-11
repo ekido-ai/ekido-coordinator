@@ -1,0 +1,26 @@
+[project]
+name = "gpuchain-coordinator"
+version = "0.1.0"
+description = "GPUChain coordinator: jobs, scheduling, recovery, artifacts, chain service"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn[standard]>=0.30",
+  "sqlalchemy>=2.0",
+  "alembic>=1.13",
+  "psycopg[binary]>=3.2",
+  "pydantic>=2.8",
+  "pydantic-settings>=2.4",
+  "web3>=7",
+  "gpuchain-core",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "httpx>=0.27"]
+
+[tool.uv.sources]
+gpuchain-core = { path = "../../packages/gpuchain_core", editable = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
