@@ -5,8 +5,8 @@ from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gpuchain_coordinator.main import Settings, create_app
-from gpuchain_coordinator.models import Settlement
+from ekido_coordinator.main import Settings, create_app
+from ekido_coordinator.models import Settlement
 
 
 class SettlementPagination(unittest.TestCase):

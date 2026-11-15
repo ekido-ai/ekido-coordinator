@@ -4,7 +4,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from gpuchain_coordinator.main import Settings, create_app
+from ekido_coordinator.main import Settings, create_app
 
 LOCAL = {"base_url": "http://127.0.0.1:8000", "client": ("127.0.0.1", 50000)}
 

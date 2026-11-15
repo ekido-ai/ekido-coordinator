@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from gpuchain_coordinator.artifacts import ArtifactError, ArtifactStore
+from ekido_coordinator.artifacts import ArtifactError, ArtifactStore
 
 
 async def chunks(*parts: bytes):

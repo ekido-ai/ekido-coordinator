@@ -21,7 +21,7 @@ from sqlalchemy.orm import Session
 
 from .models import ChainLog, IndexCursor
 
-log = logging.getLogger("gpuchain.chain_index")
+log = logging.getLogger("ekido.chain_index")
 CONFIRMATIONS = 5
 
 
@@ -32,7 +32,7 @@ class RpcLogs:
 
     def call(self, method: str, params: list) -> Any:
         body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
-        req = urllib.request.Request(self.url, data=body, headers={"content-type": "application/json", "user-agent": "gpuchain-indexer/1"})
+        req = urllib.request.Request(self.url, data=body, headers={"content-type": "application/json", "user-agent": "ekido-indexer/1"})
         with urllib.request.urlopen(req, timeout=self.timeout) as r:
             reply = json.loads(r.read())
         if "error" in reply:

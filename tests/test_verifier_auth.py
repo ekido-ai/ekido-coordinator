@@ -6,9 +6,9 @@ import unittest
 from eth_account import Account
 from fastapi.testclient import TestClient
 
-from gpuchain_core.signing import sign_document
-from gpuchain_coordinator.main import Settings, create_app
-from gpuchain_coordinator.quality_service import EvaluationTask
+from ekido_core.signing import sign_document
+from ekido_coordinator.main import Settings, create_app
+from ekido_coordinator.quality_service import EvaluationTask
 
 KEYS = ["0x" + c * 64 for c in "ab"]
 ADDRESSES = [Account.from_key(key).address for key in KEYS]

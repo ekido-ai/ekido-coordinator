@@ -3,7 +3,7 @@ import unittest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from gpuchain_coordinator.rate_limit import RateLimiter, TokenBuckets, client_key
+from ekido_coordinator.rate_limit import RateLimiter, TokenBuckets, client_key
 
 
 class Clock:
@@ -70,7 +70,7 @@ class RateLimitTest(unittest.TestCase):
         self.assertEqual(client_key({"client": ("5.6.7.8", 1), "headers": [(b"x-forwarded-for", b"9.9.9.9")]}), "5.6.7.8")
 
     def test_memory_stays_bounded(self):
-        from gpuchain_coordinator import rate_limit
+        from ekido_coordinator import rate_limit
 
         old = rate_limit.MAX_TRACKED
         rate_limit.MAX_TRACKED = 8

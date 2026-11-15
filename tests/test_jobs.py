@@ -6,10 +6,10 @@ from decimal import Decimal
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-from gpuchain_core.canonical import document_hash
-from gpuchain_core.job_states import IllegalTransition, JobState
-from gpuchain_coordinator import jobs
-from gpuchain_coordinator.models import Base, Provider, Wallet
+from ekido_core.canonical import document_hash
+from ekido_core.job_states import IllegalTransition, JobState
+from ekido_coordinator import jobs
+from ekido_coordinator.models import Base, Provider, Wallet
 
 SPEC = {"template": "synthetic-linear/v1", "seed": 1}
 POLICY = {"metric": "accuracy"}

@@ -4,8 +4,8 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from gpuchain_coordinator.main import Settings, create_app
-from gpuchain_coordinator.models import QualityDecision
+from ekido_coordinator.main import Settings, create_app
+from ekido_coordinator.models import QualityDecision
 
 
 class QualityPersistence(unittest.TestCase):

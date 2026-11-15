@@ -9,12 +9,12 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from gpuchain_core.compiler import ProbeResult
-from gpuchain_core.canonical import document_hash
-from gpuchain_coordinator import jobs
-from gpuchain_coordinator.events import EventBus, events_after
-from gpuchain_coordinator.models import AdaptationManifest, Base, Checkpoint, GpuHardware, Job, JobAssignment, Provider, ProviderReputation, RecoveryEvent, Wallet
-from gpuchain_coordinator.orchestrator import MAX_ATTEMPTS, Orchestrator
+from ekido_core.compiler import ProbeResult
+from ekido_core.canonical import document_hash
+from ekido_coordinator import jobs
+from ekido_coordinator.events import EventBus, events_after
+from ekido_coordinator.models import AdaptationManifest, Base, Checkpoint, GpuHardware, Job, JobAssignment, Provider, ProviderReputation, RecoveryEvent, Wallet
+from ekido_coordinator.orchestrator import MAX_ATTEMPTS, Orchestrator
 
 SPEC = {"template": "synthetic-linear/v1", "logical_batch_size": 32, "total_logical_steps": 300, "seed": 1}
 POLICY = {"metric": "accuracy"}
@@ -129,7 +129,7 @@ class Placement(Fixture):
             session.get(Provider, self.a).price_per_step = Decimal("0.001")
             session.commit()
             self.assertEqual(self.orch._spent(session, session.get(Job, self.job_id)), Decimal("0.2"))
-            with mock.patch("gpuchain_coordinator.orchestrator.job_service.providers_by_signer", return_value={}):
+            with mock.patch("ekido_coordinator.orchestrator.job_service.providers_by_signer", return_value={}):
                 with self.assertRaisesRegex(ValueError, "no agreed provider rate"):
                     self.orch._spent(session, session.get(Job, self.job_id))
 

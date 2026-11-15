@@ -8,12 +8,12 @@ from eth_account import Account
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gpuchain_core.signing import sign_document, verify_document
-from gpuchain_coordinator.agent_gateway import enrollment_document
-from gpuchain_coordinator.main import Settings, create_app
-from gpuchain_coordinator.models import Provider, ProviderKeyProof
+from ekido_core.signing import sign_document, verify_document
+from ekido_coordinator.agent_gateway import enrollment_document
+from ekido_coordinator.main import Settings, create_app
+from ekido_coordinator.models import Provider, ProviderKeyProof
 from sqlalchemy import select
-from gpuchain_coordinator.settlement_service import SettlementService
+from ekido_coordinator.settlement_service import SettlementService
 
 WALLET_A, WALLET_B = "0x" + "1" * 64, "0x" + "2" * 64
 OLD_WORKER, NEW_WORKER = "0x" + "a" * 64, "0x" + "b" * 64

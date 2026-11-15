@@ -7,11 +7,11 @@ from unittest.mock import AsyncMock, Mock
 from eth_account import Account
 from sqlalchemy.orm import Session
 
-from gpuchain_core.signing import sign_document
-from gpuchain_coordinator import jobs
-from gpuchain_coordinator.agent_gateway import Connection
-from gpuchain_coordinator.main import Settings, create_app
-from gpuchain_coordinator.models import Provider, Wallet
+from ekido_core.signing import sign_document
+from ekido_coordinator import jobs
+from ekido_coordinator.agent_gateway import Connection
+from ekido_coordinator.main import Settings, create_app
+from ekido_coordinator.models import Provider, Wallet
 
 KEY = "0x" + "a" * 64
 

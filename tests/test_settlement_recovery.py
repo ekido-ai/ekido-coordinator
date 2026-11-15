@@ -8,9 +8,9 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from gpuchain_coordinator import jobs
-from gpuchain_coordinator.models import Base, Job, Settlement, SettlementProposal
-from gpuchain_coordinator.settlement_service import SettlementService, VerdictTask, verdict_from_inputs
+from ekido_coordinator import jobs
+from ekido_coordinator.models import Base, Job, Settlement, SettlementProposal
+from ekido_coordinator.settlement_service import SettlementService, VerdictTask, verdict_from_inputs
 
 
 class SettlementRecovery(unittest.TestCase):
@@ -116,7 +116,7 @@ class SettlementRecovery(unittest.TestCase):
         service._finish_job = Mock()
         service.wait_for_window = Mock()
         service.orchestrator = Mock()
-        with patch("gpuchain_coordinator.settlement_service.order_signatures", return_value=["signature"]):
+        with patch("ekido_coordinator.settlement_service.order_signatures", return_value=["signature"]):
             service.settle(self.job_id)
         self.chain.ensure_finalized.assert_called()
         self.assertNotIn(unittest.mock.call(self.job_id, "ERROR"), service._set_status.call_args_list)
@@ -164,7 +164,7 @@ class SettlementRecovery(unittest.TestCase):
         self.chain.job.return_value = {"state": "Attested", "final_checkpoint": "cd" * 32, "passed": True}
         service._set_status = Mock()
         service.orchestrator = Mock()
-        with patch("gpuchain_coordinator.settlement_service.order_signatures", return_value=["signature"]):
+        with patch("ekido_coordinator.settlement_service.order_signatures", return_value=["signature"]):
             service.settle(self.job_id)
         self.chain.ensure_finalized.assert_not_called()
         service._set_status.assert_called_once_with(self.job_id, "ERROR")
@@ -182,7 +182,7 @@ class SettlementRecovery(unittest.TestCase):
         service._finish_job = Mock()
         service.wait_for_window = Mock()
         service.orchestrator = Mock()
-        with patch("gpuchain_coordinator.settlement_service.order_signatures", return_value=["signature"]):
+        with patch("ekido_coordinator.settlement_service.order_signatures", return_value=["signature"]):
             service.settle(self.job_id)
         self.chain.ensure_finalized.assert_not_called()
         service._set_status.assert_called_once_with(self.job_id, "ERROR")
@@ -206,7 +206,7 @@ class SettlementRecovery(unittest.TestCase):
         self.chain.ensure_attested.return_value = Mock(status="ALREADY_DONE")
         service._set_status = Mock()
         service.orchestrator = Mock()
-        with patch("gpuchain_coordinator.settlement_service.order_signatures", return_value=["signature"]):
+        with patch("ekido_coordinator.settlement_service.order_signatures", return_value=["signature"]):
             service.settle(self.job_id)
         self.chain.ensure_finalized.assert_not_called()
         service._set_status.assert_called_once_with(self.job_id, "ERROR")

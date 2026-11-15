@@ -17,10 +17,10 @@ from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from gpuchain_core.protocol_fee import add_fee, fee_terms, provider_budget
-from gpuchain_core.job_states import JobState
-from gpuchain_core.settlement import build_verdict
-from gpuchain_core.signing import order_signatures, recover_verdict_signer
+from ekido_core.protocol_fee import add_fee, fee_terms, provider_budget
+from ekido_core.job_states import JobState
+from ekido_core.settlement import build_verdict
+from ekido_core.signing import order_signatures, recover_verdict_signer
 
 from . import jobs as job_service
 from .chain import ChainError, EscrowClient

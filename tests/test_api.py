@@ -7,9 +7,9 @@ from sqlalchemy.orm import Session
 
 from fastapi.testclient import TestClient
 
-from gpuchain_coordinator.main import Settings, create_app
-from gpuchain_coordinator.models import JobBinding, Provider, Wallet
-from gpuchain_core.payout_terms import job_binding, new_job_ids, provider_quote, workload_hash
+from ekido_coordinator.main import Settings, create_app
+from ekido_coordinator.models import JobBinding, Provider, Wallet
+from ekido_core.payout_terms import job_binding, new_job_ids, provider_quote, workload_hash
 
 BODY = {
     "workload": {
@@ -160,8 +160,8 @@ class ApiTest(unittest.TestCase):
         from sqlalchemy import create_engine
         from sqlalchemy.orm import Session
 
-        from gpuchain_coordinator.events import events_after, record_event
-        from gpuchain_coordinator.models import Base
+        from ekido_coordinator.events import events_after, record_event
+        from ekido_coordinator.models import Base
 
         with tempfile.TemporaryDirectory() as tmp:
             engine = create_engine(f"sqlite:///{Path(tmp) / 'race.db'}", connect_args={"timeout": 30})
