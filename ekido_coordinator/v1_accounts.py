@@ -26,7 +26,8 @@ log = logging.getLogger(__name__)
 
 
 class EmailSender(Protocol):
-    def send_login_link(self, email: str, link: str) -> None: ...
+    def send_login_link(self, email: str, link: str) -> None:
+        """Delivers a one-time sign-in link to the address."""
 
 
 class NoEmail:

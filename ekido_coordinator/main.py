@@ -35,8 +35,7 @@ from ekido_core.signing import verify_document
 
 from . import jobs as job_service
 from .agent_gateway import AgentGateway
-from . import accounts  # noqa: F401  (registers the account tables before create_all)
-from .accounts import AccountError
+from .accounts import AccountError  # Importing the module also registers the account tables before create_all.
 from .api_guard import ApiGuard
 from .v1_accounts import LogEmail, NoEmail, SesEmail, build_router, error as account_error
 from .rate_limit import RateLimiter
