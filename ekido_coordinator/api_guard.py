@@ -13,7 +13,8 @@ import secrets
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-OWN_AUTH_PREFIXES = ("/agent/ws", "/artifacts/", "/verifier/", "/providers/join")
+# /v1/ checks sessions and API keys itself (v1_accounts.py), including the Origin of cookie-authenticated changes.
+OWN_AUTH_PREFIXES = ("/agent/ws", "/artifacts/", "/verifier/", "/providers/join", "/v1/")
 LOOPBACK_NAMES = {"localhost", "127.0.0.1", "::1"}
 
 
