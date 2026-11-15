@@ -5,7 +5,7 @@ import os
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from ekido_coordinator import accounts  # noqa: F401  (registers the account tables)
+from ekido_coordinator import accounts
 from ekido_coordinator.models import Base
 
 config = context.config
@@ -13,7 +13,10 @@ url = os.environ.get("DATABASE_URL")
 if not url:
     raise SystemExit("Set DATABASE_URL to the database to migrate.")
 config.set_main_option("sqlalchemy.url", url.replace("%", "%%"))
+# Importing accounts registers its tables on Base; naming one here keeps that import visibly in use.
+ACCOUNT_TABLES = accounts.UserEmail.__table__.metadata
 target_metadata = Base.metadata
+assert ACCOUNT_TABLES is target_metadata
 
 
 def run_offline() -> None:
