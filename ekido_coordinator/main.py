@@ -35,7 +35,9 @@ from ekido_core.signing import verify_document
 
 from . import jobs as job_service
 from .agent_gateway import AgentGateway
+from .accounts import AccountError  # Importing the module also registers the account tables before create_all.
 from .api_guard import ApiGuard
+from .v1_accounts import LogEmail, NoEmail, SesEmail, build_router, error as account_error
 from .rate_limit import RateLimiter
 from .artifacts import ArtifactError, ArtifactStore, S3Blobs, UploadBudget, UploadBudgetExceeded
 from .events import EventBus, events_after, record_event
@@ -77,6 +79,12 @@ class Settings(BaseSettings):
     max_pending_upload_bytes: int = 2 * 1024**3
     verifier_addresses: str = ""  # Comma-separated. Empty means no quality gate, so jobs stop at VALIDATING.
     verifier_quorum: int = 2
+    # Accounts (/v1): where sign-in links point, and how they're sent: "none", "log" (staging only) or "ses".
+    site_url: str = "http://localhost:3100"
+    email_sender: str = "none"
+    email_from: str = ""
+    email_region: str = ""
+    session_cookie_secure: bool = True
     # Chain settings. With no RPC_URL or ESCROW_ADDRESS, the coordinator runs with no chain.
     rpc_url: str = ""
     chain_id: int = 84532
@@ -331,6 +339,19 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
     app.state.engine = engine
     app.state.gateway = gateway
     app.state.store = store
+
+    senders = {"none": NoEmail, "log": LogEmail}
+    if settings.email_sender == "ses":
+        sender = SesEmail(settings.email_from, region=settings.email_region or None)
+    else:
+        sender = senders.get(settings.email_sender, NoEmail)()
+    v1_router, v1_principal = build_router(engine, sender=sender, site_url=settings.site_url, allowed_origins=settings.cors_origins, cookie_secure=settings.session_cookie_secure)
+    app.include_router(v1_router)
+    app.state.v1_principal = v1_principal
+
+    @app.exception_handler(AccountError)
+    async def account_refused(_: Request, exc: AccountError):
+        return account_error(exc)
 
     def require_artifact_token(authorization: str | None = Header(default=None)) -> str:
         token = (authorization or "").removeprefix("Bearer ").strip()

@@ -13,7 +13,8 @@ import secrets
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-OWN_AUTH_PREFIXES = ("/agent/ws", "/artifacts/", "/verifier/", "/providers/join")
+# /v1/ checks sessions and API keys itself (v1_accounts.py), including the Origin of cookie-authenticated changes.
+OWN_AUTH_PREFIXES = ("/agent/ws", "/artifacts/", "/verifier/", "/providers/join", "/v1/")
 # What a public server shows anyone. Job timelines, recoveries, settlements, the provider list and the live event
 # stream all identify providers, so they need the operator token: no public list or count of who is connected.
 # Customers see their own jobs, without provider identities, through /v1.
