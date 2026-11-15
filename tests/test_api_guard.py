@@ -99,15 +99,26 @@ class ApiGuardTest(unittest.TestCase):
         self.assertEqual(TestClient(build(), **LOCAL).get("/settlements").json(), [])
         self.assertEqual(TestClient(build(), **REMOTE).get("/settlements").status_code, 401)
 
-    def test_a_public_server_lets_anyone_watch_but_not_change_anything(self):
+    def test_a_public_server_shows_only_health_and_fees(self):
+        # Hide providers: nothing that names, lists or counts providers is readable without the operator token.
         client = TestClient(build(public_read=True), **REMOTE)
-        self.assertEqual(client.get("/jobs").status_code, 200)
-        self.assertEqual(client.get("/providers").status_code, 200)
+        for path in ("/healthz", "/fees"):
+            with self.subTest(path=path):
+                self.assertEqual(client.get(path).status_code, 200)
+        self.assertNotEqual(client.get("/readyz").status_code, 401)
+        for path in ("/providers", "/jobs", "/jobs/x/timeline", "/jobs/x/recoveries", "/jobs/x/checkpoints", "/settlements", "/chain/logs"):
+            with self.subTest(path=path):
+                self.assertEqual(client.get(path).status_code, 401)
         for method, path in (("POST", "/jobs"), ("POST", "/demo/faults"), ("POST", "/jobs/x/cancel"), ("POST", "/providers")):
             with self.subTest(path=path):
                 self.assertEqual(client.request(method, path, json={}).status_code, 401)
-        with TestClient(build(public_read=True), base_url="http://192.168.1.20:8000", client=("192.168.1.50", 50000)).websocket_connect("ws://192.168.1.20:8000/ws/jobs/x") as socket:
-            socket.close()
+        with self.assertRaises(WebSocketDisconnect):  # The live job stream carries provider identities.
+            with TestClient(build(public_read=True), base_url="http://192.168.1.20:8000", client=("192.168.1.50", 50000)).websocket_connect("ws://192.168.1.20:8000/ws/jobs/x") as socket:
+                socket.receive_text()
+
+    def test_the_operator_still_sees_everything_on_a_public_server(self):
+        client = TestClient(build(public_read=True, api_token="op-token"), **REMOTE)
+        self.assertEqual(client.get("/providers", headers={"Authorization": "Bearer op-token"}).status_code, 200)
 
     def test_open_api_is_for_a_port_published_only_on_loopback(self):
         client = TestClient(build(open_api=True), base_url="http://127.0.0.1:8000", client=("172.17.0.1", 50000))
