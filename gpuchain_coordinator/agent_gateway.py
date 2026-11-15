@@ -95,8 +95,12 @@ class AgentGateway:
         try:
             self._send_blocking(provider_id, "cmd.probe", {"request_id": request_id, "config": config})
             result = future.result(timeout=PROBE_TIMEOUT)
-        except (concurrent.futures.TimeoutError, ConnectionError) as exc:
-            return ProbeResult(ok=False, error=f"Probe didn't complete: {exc or 'timed out'}")
+        except concurrent.futures.TimeoutError:
+            return ProbeResult(ok=False, error="Probe didn't complete: timed out")
+        except ConnectionError as exc:
+            # The exception's text stays in the log. The result, which an API response can carry, gets a fixed message.
+            log.warning("probe on provider %s lost its connection: %s", provider_id, exc)
+            return ProbeResult(ok=False, error="Probe didn't complete: the provider disconnected")
         finally:
             self._pending_probes.pop(request_id, None)
         return ProbeResult(
