@@ -35,14 +35,17 @@ DEFAULT_PROBATION_STEPS = 50
 class AgentLink(Protocol):
     """How the orchestrator reaches providers. The gateway implements it, and tests fake it. All calls block."""
 
-    def is_connected(self, provider_id: str) -> bool: ...
+    def is_connected(self, provider_id: str) -> bool:
+        """True while the provider's agent holds an open connection."""
 
-    def probe(self, provider_id: str, config: dict) -> ProbeResult: ...
+    def probe(self, provider_id: str, config: dict) -> ProbeResult:
+        """Runs one memory probe of this config on the provider and returns what it measured."""
 
     def start_run(self, provider_id: str, config: dict) -> None:
         """Raises on failure to start."""
 
-    def stop_run(self, provider_id: str, job_id: str, fencing_token: int) -> None: ...
+    def stop_run(self, provider_id: str, job_id: str, fencing_token: int) -> None:
+        """Asks the provider to stop the run that holds this fencing token."""
 
 
 class QualityLink(Protocol):
