@@ -24,13 +24,13 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
-from gpuchain_core.canonical import document_hash
-from gpuchain_core.job_spec import policy_problems, spec_problems
-from gpuchain_core.job_states import IllegalTransition, JobState
-from gpuchain_core.payout_terms import validate_terms
-from gpuchain_core.protocol_fee import fee_amount, fee_terms, provider_budget
-from gpuchain_core.provider_meta import metadata_hash, provider_metadata
-from gpuchain_core.signing import verify_document
+from ekido_core.canonical import document_hash
+from ekido_core.job_spec import policy_problems, spec_problems
+from ekido_core.job_states import IllegalTransition, JobState
+from ekido_core.payout_terms import validate_terms
+from ekido_core.protocol_fee import fee_amount, fee_terms, provider_budget
+from ekido_core.provider_meta import metadata_hash, provider_metadata
+from ekido_core.signing import verify_document
 
 from . import jobs as job_service
 from .agent_gateway import AgentGateway
@@ -128,7 +128,7 @@ class RegisterProviderRequest(StrictModel):
 
 
 class JoinProviderRequest(StrictModel):
-    """A provider signing itself up with its own wallet. See gpuchain_agent.join."""
+    """A provider signing itself up with its own wallet. See ekido_agent.join."""
 
     document: dict[str, Any]
     signature: str = Field(min_length=1, max_length=200)
@@ -301,7 +301,7 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
         yield
         monitor.cancel()
 
-    app = FastAPI(title="GPUChain Coordinator", version="0.1.0", lifespan=lifespan)
+    app = FastAPI(title="Ekido Coordinator", version="0.1.0", lifespan=lifespan)
     app.add_middleware(ApiGuard, token=settings.api_token, allowed_origins=settings.cors_origins, open_api=settings.open_api, public_read=settings.public_read)
     app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"], allow_headers=["*"])
     # Outermost, so a flood is refused before any other work is done.

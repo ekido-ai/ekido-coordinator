@@ -1,7 +1,7 @@
 [project]
-name = "gpuchain-coordinator"
+name = "ekido-coordinator"
 version = "0.1.0"
-description = "GPUChain coordinator: jobs, scheduling, recovery, artifacts, chain service"
+description = "Ekido coordinator: jobs, scheduling, recovery, artifacts, chain service"
 requires-python = ">=3.12,<3.13"
 dependencies = [
   "fastapi>=0.115",
@@ -12,14 +12,14 @@ dependencies = [
   "pydantic>=2.8",
   "pydantic-settings>=2.4",
   "web3>=7",
-  "gpuchain-core",
+  "ekido-core",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "httpx>=0.27"]
 
 [tool.uv.sources]
-gpuchain-core = { path = "../../packages/gpuchain_core", editable = true }
+ekido-core = { path = "../../packages/ekido_core", editable = true }
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

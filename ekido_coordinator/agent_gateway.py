@@ -19,8 +19,8 @@ from sqlalchemy.engine import Engine
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from gpuchain_core.compiler import ProbeResult
-from gpuchain_core.signing import recover_document_signer, verify_document
+from ekido_core.compiler import ProbeResult
+from ekido_core.signing import recover_document_signer, verify_document
 
 from . import jobs as job_service
 from .jobs import LineageError, StaleFencingToken

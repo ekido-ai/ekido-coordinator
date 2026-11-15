@@ -12,7 +12,7 @@ import uuid
 from time import monotonic
 from dataclasses import dataclass, field
 
-from gpuchain_core.signing import verify_document
+from ekido_core.signing import verify_document
 
 
 class QualityTimeout(Exception):

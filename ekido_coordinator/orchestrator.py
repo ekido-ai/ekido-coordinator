@@ -18,8 +18,8 @@ from sqlalchemy import select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
-from gpuchain_core.compiler import Decision, ProbeResult, Target, build_adaptation_manifest, compile_for_target, verify_config, workload_key
-from gpuchain_core.job_states import JobState
+from ekido_core.compiler import Decision, ProbeResult, Target, build_adaptation_manifest, compile_for_target, verify_config, workload_key
+from ekido_core.job_states import JobState
 
 from . import jobs as job_service
 from .events import EventBus, record_event

@@ -4,8 +4,8 @@ import unittest
 from eth_account import Account
 from fastapi.testclient import TestClient
 
-from gpuchain_core.signing import sign_document
-from gpuchain_coordinator.main import Settings, create_app
+from ekido_core.signing import sign_document
+from ekido_coordinator.main import Settings, create_app
 
 WALLET_KEY = "0x" + "5" * 64
 WALLET = Account.from_key(WALLET_KEY).address
@@ -103,7 +103,7 @@ class JoinAbuseTest(unittest.TestCase):
 
 class MetadataHashTest(unittest.TestCase):
     def test_providers_publish_the_hash_the_provider_commits_on_chain(self):
-        from gpuchain_core.provider_meta import metadata_hash, provider_metadata
+        from ekido_core.provider_meta import metadata_hash, provider_metadata
 
         app = create_app(Settings(database_url="sqlite://", demo_mode=True, _env_file=None))
         joined = TestClient(app, **REMOTE).post("/providers/join", json=signed(doc())).json()

@@ -3,7 +3,7 @@ import unittest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from gpuchain_coordinator.main import Settings, create_app
+from ekido_coordinator.main import Settings, create_app
 
 LOCAL = {"base_url": "http://127.0.0.1:8000", "client": ("127.0.0.1", 50000)}
 REMOTE = {"base_url": "http://192.168.1.20:8000", "client": ("192.168.1.50", 50000)}

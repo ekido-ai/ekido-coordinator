@@ -1,7 +1,7 @@
 import unittest
 from decimal import Decimal
 
-from gpuchain_coordinator.scheduler import Candidate, Requirements, failure_probability, rank
+from ekido_coordinator.scheduler import Candidate, Requirements, failure_probability, rank
 
 
 def candidate(pid="a", price="0.01", speed=10.0, peak=1000.0, cap=3000.0, total=10, failed=0, online=True, excluded=False):

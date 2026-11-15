@@ -4,8 +4,8 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from gpuchain_coordinator.main import Settings, create_app
-from gpuchain_coordinator.orchestrator import Orchestrator
+from ekido_coordinator.main import Settings, create_app
+from ekido_coordinator.orchestrator import Orchestrator
 from test_api import BODY
 
 LEAK = "Traceback (most recent call last): File /home/provider/secret.py line 9"

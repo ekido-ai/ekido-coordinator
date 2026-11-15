@@ -4,8 +4,8 @@ from unittest.mock import patch
 
 from eth_account import Account
 
-from gpuchain_core.signing import sign_document
-from gpuchain_coordinator.quality_service import QualityTimeout, QuorumQuality, quorum_decision
+from ekido_core.signing import sign_document
+from ekido_coordinator.quality_service import QualityTimeout, QuorumQuality, quorum_decision
 
 KEYS = ["0x" + c * 64 for c in "123"]
 ADDRESSES = [Account.from_key(k).address for k in KEYS]
@@ -163,13 +163,13 @@ class Flow(unittest.TestCase):
     def test_unfinished_claim_expires_but_submitted_report_is_not_reclaimed(self):
         svc = service()
         thread, _ = self.run_evaluation(svc)
-        with patch("gpuchain_coordinator.quality_service.monotonic", return_value=100):
+        with patch("ekido_coordinator.quality_service.monotonic", return_value=100):
             first = svc.claim(ADDRESSES[0])
             self.assertIsNone(svc.claim(ADDRESSES[0]))
-        with patch("gpuchain_coordinator.quality_service.monotonic", return_value=280):
+        with patch("ekido_coordinator.quality_service.monotonic", return_value=280):
             self.assertEqual(svc.claim(ADDRESSES[0]), first)
             svc.submit(first["task_id"], report(KEYS[0]))
-        with patch("gpuchain_coordinator.quality_service.monotonic", return_value=1000):
+        with patch("ekido_coordinator.quality_service.monotonic", return_value=1000):
             self.assertIsNone(svc.claim(ADDRESSES[0]))
         svc.submit(first["task_id"], report(KEYS[1]))
         thread.join(5)

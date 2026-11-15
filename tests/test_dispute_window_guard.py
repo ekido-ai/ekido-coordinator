@@ -5,8 +5,8 @@ from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from gpuchain_coordinator.chain import EscrowClient
-from gpuchain_coordinator.settlement_service import NotFunded, SettlementService
+from ekido_coordinator.chain import EscrowClient
+from ekido_coordinator.settlement_service import NotFunded, SettlementService
 
 
 class DisputeWindowGuard(unittest.TestCase):

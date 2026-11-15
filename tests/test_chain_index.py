@@ -4,9 +4,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.pool import StaticPool
 
-from gpuchain_coordinator.chain_index import ChainIndexer, logs_since
-from gpuchain_coordinator.main import Settings, create_app
-from gpuchain_coordinator.models import Base
+from ekido_coordinator.chain_index import ChainIndexer, logs_since
+from ekido_coordinator.main import Settings, create_app
+from ekido_coordinator.models import Base
 
 ESCROW = "0x1BF65f755457a92850009c88AFb337Ec57745a22"
 

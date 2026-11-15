@@ -9,7 +9,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 from unittest.mock import Mock
 
-from gpuchain_coordinator.settlement_service import DEADLINE_TOLERANCE_SECONDS, NotFunded, SettlementService
+from ekido_coordinator.settlement_service import DEADLINE_TOLERANCE_SECONDS, NotFunded, SettlementService
 
 
 class DeadlineGuard(unittest.TestCase):

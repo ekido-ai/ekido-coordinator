@@ -8,8 +8,8 @@ from decimal import Decimal
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
-from gpuchain_core.canonical import document_hash
-from gpuchain_core.job_states import JobState, check_transition
+from ekido_core.canonical import document_hash
+from ekido_core.job_states import JobState, check_transition
 
 from .models import Checkpoint, Job, JobAssignment, JobTransition, Provider, ProviderKey, ProviderKeyProof, new_id
 
