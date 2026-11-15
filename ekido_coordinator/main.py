@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import re
 import shutil
 import secrets
@@ -16,7 +17,7 @@ from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import and_, create_engine, func, or_, select
@@ -36,7 +37,7 @@ from . import jobs as job_service
 from .agent_gateway import AgentGateway
 from .api_guard import ApiGuard
 from .rate_limit import RateLimiter
-from .artifacts import ArtifactError, ArtifactStore, UploadBudget, UploadBudgetExceeded
+from .artifacts import ArtifactError, ArtifactStore, S3Blobs, UploadBudget, UploadBudgetExceeded
 from .events import EventBus, events_after, record_event
 from .models import Base, Checkpoint, FaultInjection, GpuHardware, IdempotencyRecord, Job, JobBinding, Provider, ProviderKey, QualityDecision, RecoveryEvent, Settlement, Wallet
 from .orchestrator import Orchestrator, QualityLink
@@ -66,6 +67,10 @@ class Settings(BaseSettings):
     rate_limit_writes_per_minute: int = 40
     cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3100", "http://127.0.0.1:3100"]
     artifact_dir: str = "data/artifacts"
+    # With a bucket set, workers upload and download checkpoint blobs straight to and from S3 through presigned
+    # links. Blobs already on disk, and uploads from older workers, keep using artifact_dir.
+    artifact_s3_bucket: str = ""
+    artifact_s3_region: str = ""
     # Checkpoint bytes one job may keep on disk at once, counted the way retention keeps them. 0 turns the cap off.
     max_job_storage_bytes: int = 5 * 1024**3
     # Bytes one provider may upload that no committed checkpoint references yet.
@@ -101,6 +106,10 @@ class FaultRequest(StrictModel):
 
 class QualifyRequest(StrictModel):
     workload: dict[str, Any]
+
+
+class UploadUrlRequest(StrictModel):
+    bytes: int = Field(gt=0)
 
 
 class VerifierSessionRequest(StrictModel):
@@ -233,6 +242,7 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
 
     bus = EventBus()
     store = ArtifactStore(Path(settings.artifact_dir))
+    blobs = S3Blobs(settings.artifact_s3_bucket, region=settings.artifact_s3_region or None) if settings.artifact_s3_bucket else None
     if quality is None and settings.verifier_addresses:
         quality = QuorumQuality({a.strip() for a in settings.verifier_addresses.split(",") if a.strip()}, settings.verifier_quorum)
     # Must come after quality is set: the gateway builds its orchestrator immediately.
@@ -691,14 +701,50 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
         return {"sha256": digest, "bytes": size}
 
     @app.get("/artifacts/{digest}")
-    def get_artifact(digest: str, _: str = Depends(require_artifact_token)) -> FileResponse:
+    def get_artifact(digest: str, _: str = Depends(require_artifact_token)) -> Any:
         try:
             path = store.path_for(digest)
+            if not path.is_file() and blobs is not None and blobs.exists(digest):
+                # An older worker downloading a blob that a newer one uploaded straight to S3.
+                body = blobs.open(digest)
+                return StreamingResponse(body.iter_chunks(64 * 1024), media_type="application/octet-stream")
         except ArtifactError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         if not path.is_file():
             raise HTTPException(status_code=404, detail="artifact not found")
         return FileResponse(path, media_type="application/octet-stream")
+
+    @app.post("/artifacts/{digest}/upload-url")
+    def artifact_upload_url(digest: str, body: UploadUrlRequest, owner: str = Depends(require_artifact_token)) -> dict[str, Any]:
+        """A presigned S3 link for one blob. 404 when direct uploads are off: the worker then uploads through PUT."""
+        if blobs is None:
+            raise HTTPException(status_code=404, detail="direct uploads are not enabled")
+        try:
+            if store.exists(digest):
+                os.utime(store.path_for(digest))  # Keep it safe from retention until its checkpoint commits.
+                return {"exists": True}
+            if blobs.exists(digest):
+                blobs.touch(digest)
+                return {"exists": True}
+            upload_budget.check(owner, body.bytes)
+            offer = blobs.upload_url(digest, body.bytes)
+        except UploadBudgetExceeded as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
+        except ArtifactError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        # Counted when the link is issued: the coordinator never sees the upload itself.
+        upload_budget.record(owner, digest, body.bytes)
+        return offer
+
+    @app.get("/artifacts/{digest}/download-url")
+    def artifact_download_url(digest: str, _: str = Depends(require_artifact_token)) -> dict[str, Any]:
+        """A presigned S3 link when the blob is in the bucket. 404 otherwise: the worker then downloads through GET."""
+        try:
+            if blobs is None or store.exists(digest) or not blobs.exists(digest):
+                raise HTTPException(status_code=404, detail="no direct link for this artifact")
+            return {"url": blobs.download_url(digest), "expires_in": blobs.url_ttl}
+        except ArtifactError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.websocket("/agent/ws")
     async def agent_socket(websocket: WebSocket):
