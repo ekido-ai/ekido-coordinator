@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     # Protocol fee on accepted work, paid by the client on top. When set, every new job's spec must carry exactly these terms.
     protocol_fee_bps: int = 0
     protocol_fee_recipient: str = ""
-    public_read: bool = False  # A public server: anyone may read and watch jobs. Writes still need API_TOKEN or this machine.
+    public_read: bool = False  # A public server: anyone may read /healthz, /readyz and /fees. Everything else needs API_TOKEN.
     # Per-client limits on every route; this machine's own traffic (operator, verifiers, monitor) is exempt.
     # Chain indexer (chain_index.py): copies escrow/registry logs so the dashboard loads history in one request.
     index_enabled: bool = False

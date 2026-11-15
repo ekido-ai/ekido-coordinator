@@ -15,6 +15,10 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 
 # /v1/ checks sessions and API keys itself (v1_accounts.py), including the Origin of cookie-authenticated changes.
 OWN_AUTH_PREFIXES = ("/agent/ws", "/artifacts/", "/verifier/", "/providers/join", "/v1/")
+# What a public server shows anyone. Job timelines, recoveries, settlements, the provider list and the live event
+# stream all identify providers, so they need the operator token: no public list or count of who is connected.
+# Customers see their own jobs, without provider identities, through /v1.
+PUBLIC_READ_PATHS = frozenset({"/healthz", "/readyz", "/fees"})
 LOOPBACK_NAMES = {"localhost", "127.0.0.1", "::1"}
 
 
@@ -38,7 +42,7 @@ class ApiGuard:
         self.token = token.encode()
         self.allowed_origins = set(allowed_origins)
         self.open_api = open_api
-        # A public server lets anyone watch: GET requests and the job event stream. Changing anything still needs the token.
+        # A public server answers anyone only on PUBLIC_READ_PATHS. Everything else, reads included, needs the token.
         self.public_read = public_read
 
     def _refusal(self, scope: Scope) -> tuple[int, str] | None:
@@ -53,7 +57,7 @@ class ApiGuard:
             return 403, f"The origin {origin} isn't allowed to use this API."
         if self.open_api:
             return None
-        if self.public_read and (scope.get("method") in ("GET", "HEAD") or (scope["type"] == "websocket" and path.startswith("/ws/jobs/"))):
+        if self.public_read and scope.get("method") in ("GET", "HEAD") and path in PUBLIC_READ_PATHS:
             return None
 
         scheme, _, presented = headers.get("authorization", "").partition(" ")
