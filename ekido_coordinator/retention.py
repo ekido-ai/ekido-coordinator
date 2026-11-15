@@ -34,7 +34,7 @@ from sqlalchemy.orm import Session
 from ekido_core.checkpoint_files import checkpoint_files
 from ekido_core.job_states import TERMINAL, JobState
 
-from .artifacts import ArtifactStore
+from .artifacts import ArtifactStore, S3Blobs
 from .models import Checkpoint, Job, JobTransition, Settlement
 
 log = logging.getLogger("ekido.retention")
@@ -119,46 +119,52 @@ def keep_set(session: Session, now: datetime) -> set[str]:
 @dataclass
 class Plan:
     move: list[str] = field(default_factory=list)
+    move_remote: list[str] = field(default_factory=list)  # Blobs in the S3 bucket.
     kept: int = 0
     young_orphans: int = 0
     bytes_to_move: int = 0
 
 
-def plan(store: ArtifactStore, keep: set[str], now: datetime) -> Plan:
+def plan(store: ArtifactStore, keep: set[str], now: datetime, blobs: S3Blobs | None = None) -> Plan:
     result = Plan()
-    for digest in store.iter_digests():
-        if digest in keep:
-            result.kept += 1
-        elif now - store.modified_at(digest) < ORPHAN_GRACE:
-            result.young_orphans += 1
-        else:
-            result.move.append(digest)
-            result.bytes_to_move += store.size_of(digest)
+    local = ((digest, store.size_of(digest), store.modified_at(digest), result.move) for digest in store.iter_digests())
+    remote = ((digest, size, modified, result.move_remote) for digest, size, modified in (blobs.iter_blobs() if blobs else ()))
+    for source in (local, remote):
+        for digest, size, modified, bucket in source:
+            if digest in keep:
+                result.kept += 1
+            elif now - modified < ORPHAN_GRACE:
+                result.young_orphans += 1
+            else:
+                bucket.append(digest)
+                result.bytes_to_move += size
     return result
 
 
-def run(engine: Engine, store: ArtifactStore, *, apply: bool, now: datetime | None = None) -> dict:
+def run(engine: Engine, store: ArtifactStore, *, apply: bool, now: datetime | None = None, blobs: S3Blobs | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
     with Session(engine) as session:
         keep = keep_set(session, now)
-    result = plan(store, keep, now)
+    result = plan(store, keep, now, blobs)
     moved, purged = [], []
     if apply:
-        for digest in result.move:
-            try:
-                # Uploaded again since the plan was made (a new checkpoint reuses identical content): leave it.
-                if datetime.now(timezone.utc) - store.modified_at(digest) < ORPHAN_GRACE:
+        for where, digests in ((store, result.move), (blobs, result.move_remote)):
+            for digest in digests:
+                try:
+                    # Uploaded again since the plan was made (a new checkpoint reuses identical content): leave it.
+                    if datetime.now(timezone.utc) - where.modified_at(digest) < ORPHAN_GRACE:
+                        continue
+                    where.quarantine(digest, now)
+                    moved.append(digest)
+                except FileNotFoundError:
                     continue
-                store.quarantine(digest, now)
-                moved.append(digest)
-            except FileNotFoundError:
-                continue
+        # The bucket's own lifecycle rule empties its quarantine; only the local one is purged here.
         purged = store.purge_quarantine(QUARANTINE_KEPT_FOR, now)
     summary = {
         "applied": apply,
         "kept": result.kept,
         "young_orphans": result.young_orphans,
-        "to_quarantine": len(result.move),
+        "to_quarantine": len(result.move) + len(result.move_remote),
         "bytes_to_quarantine": result.bytes_to_move,
         "moved": len(moved),
         "purged_quarantine_days": purged,
@@ -175,7 +181,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     settings = Settings()
-    summary = run(create_engine_for(settings.database_url), ArtifactStore(Path(settings.artifact_dir)), apply=args.apply)
+    blobs = S3Blobs(settings.artifact_s3_bucket, region=settings.artifact_s3_region or None) if settings.artifact_s3_bucket else None
+    summary = run(create_engine_for(settings.database_url), ArtifactStore(Path(settings.artifact_dir)), apply=args.apply, blobs=blobs)
     print(json.dumps(summary))
     return 0
 

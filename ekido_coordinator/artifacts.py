@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import os
 import re
@@ -178,3 +179,92 @@ class UploadBudget:
         now = time.monotonic() if now is None else now
         with self._lock:
             return sum(size for size, _ in self._live(owner, now).values())
+
+
+class S3Blobs:
+    """Checkpoint blobs in an S3 bucket, at blobs/<sha256>. Providers and verifiers move the bytes with short-lived
+    presigned links, so large checkpoints never pass through the coordinator.
+
+    An upload link is signed together with the blob's SHA-256 and length, and S3 refuses any body that doesn't match
+    (BadDigest), so a stored blob still can't be swapped. "Removing" a blob moves it to quarantine/<yyyymmdd>/, which a
+    bucket lifecycle rule empties after 30 days; the server's role can't delete anything there.
+    """
+
+    PREFIX = "blobs/"
+    QUARANTINE = "quarantine/"
+
+    def __init__(self, bucket: str, client=None, region: str | None = None, url_ttl: int = 900, max_bytes: int = MAX_BLOB_BYTES):
+        if client is None:
+            import boto3  # Only the server needs it; the local store works without.
+            from botocore.config import Config
+
+            client = boto3.client("s3", region_name=region, config=Config(signature_version="s3v4", s3={"addressing_style": "virtual"}))
+        self.bucket = bucket
+        self.client = client
+        self.url_ttl = url_ttl
+        self.max_bytes = max_bytes
+
+    def key(self, digest: str) -> str:
+        if not SHA256_PATTERN.fullmatch(digest):
+            raise ArtifactError("not a lowercase SHA-256")
+        return self.PREFIX + digest
+
+    def _head(self, digest: str) -> dict | None:
+        try:
+            return self.client.head_object(Bucket=self.bucket, Key=self.key(digest))
+        except Exception as exc:  # botocore's ClientError; a 404 means it isn't there.
+            status = getattr(exc, "response", {}).get("ResponseMetadata", {}).get("HTTPStatusCode")
+            if status == 404:
+                return None
+            raise
+
+    def exists(self, digest: str) -> bool:
+        return self._head(digest) is not None
+
+    def modified_at(self, digest: str) -> datetime:
+        head = self._head(digest)
+        if head is None:
+            raise FileNotFoundError(digest)
+        return head["LastModified"]
+
+    def upload_url(self, digest: str, size: int) -> dict:
+        if type(size) is not int or not 0 < size <= self.max_bytes:
+            raise ArtifactError(f"size must be between 1 and {self.max_bytes} bytes")
+        checksum = base64.b64encode(bytes.fromhex(digest)).decode()
+        url = self.client.generate_presigned_url(
+            "put_object",
+            Params={"Bucket": self.bucket, "Key": self.key(digest), "ContentLength": size, "ChecksumSHA256": checksum},
+            ExpiresIn=self.url_ttl,
+        )
+        return {"url": url, "headers": {"x-amz-checksum-sha256": checksum}, "expires_in": self.url_ttl}
+
+    def download_url(self, digest: str) -> str:
+        return self.client.generate_presigned_url("get_object", Params={"Bucket": self.bucket, "Key": self.key(digest)}, ExpiresIn=self.url_ttl)
+
+    def open(self, digest: str):
+        """The object's body, for serving an older worker that downloads through the coordinator."""
+        return self.client.get_object(Bucket=self.bucket, Key=self.key(digest))["Body"]
+
+    def touch(self, digest: str) -> None:
+        """Marks a blob as just uploaded (a copy onto itself), so retention leaves it alone until its checkpoint commits."""
+        key = self.key(digest)
+        self.client.copy_object(
+            Bucket=self.bucket, Key=key, CopySource={"Bucket": self.bucket, "Key": key},
+            MetadataDirective="REPLACE", Metadata={"touched": str(int(time.time()))},
+        )
+
+    def iter_blobs(self) -> Iterator[tuple[str, int, datetime]]:
+        paginator = self.client.get_paginator("list_objects_v2")
+        for page in paginator.paginate(Bucket=self.bucket, Prefix=self.PREFIX):
+            for item in page.get("Contents", []):
+                digest = item["Key"][len(self.PREFIX):]
+                if SHA256_PATTERN.fullmatch(digest):
+                    yield digest, item["Size"], item["LastModified"]
+
+    def quarantine(self, digest: str, now: datetime) -> str:
+        """Copy to quarantine first, then remove the original, so a failure in between loses nothing."""
+        source = self.key(digest)
+        target = f"{self.QUARANTINE}{now.strftime('%Y%m%d')}/{digest}"
+        self.client.copy_object(Bucket=self.bucket, Key=target, CopySource={"Bucket": self.bucket, "Key": source})
+        self.client.delete_object(Bucket=self.bucket, Key=source)
+        return target
