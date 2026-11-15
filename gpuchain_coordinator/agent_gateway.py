@@ -207,7 +207,7 @@ class AgentGateway:
                 message = await websocket.receive_json()
                 await self._on_message(connection, message)
         except (WebSocketDisconnect, asyncio.TimeoutError, RuntimeError, ValueError):
-            pass
+            pass  # The connection ended or sent unusable data; the finally block below marks the provider offline.
         finally:
             # A newer connection may already have replaced this one. Don't remove that.
             if connection is not None and self.connections.get(connection.provider_id) is connection:

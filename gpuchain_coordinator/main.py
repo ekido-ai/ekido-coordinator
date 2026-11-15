@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 import re
 import shutil
 import secrets
@@ -638,7 +639,13 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
         problems = spec_problems(body.workload)
         if problems:
             return JSONResponse(status_code=422, content={"error": "INVALID_JOB_SPEC", "problems": problems})
-        return gateway.orchestrator.qualify_providers(body.workload)
+        results = gateway.orchestrator.qualify_providers(body.workload)
+        # A failed probe's reason is text from the provider's machine. It stays in the log, not in the response.
+        for result in results:
+            if result.get("code") == "PROBE_ERROR":
+                logging.getLogger(__name__).warning("probe failed on provider %s: %s", result.get("provider_id"), result.get("reason"))
+                result["reason"] = "The probe failed on the provider"
+        return results
 
     @app.post("/jobs/{job_id}/activate")
     def activate(job_id: str, session: Session = Depends(get_session)) -> dict[str, Any]:
