@@ -245,8 +245,10 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
     settings = settings or Settings()
     if engine is None:
         engine = create_engine_for(settings.database_url)
-    # Replaced by Alembic migrations once the schema settles. Harmless on existing tables.
-    Base.metadata.create_all(engine)
+    # SQLite (tests, the old server): create any missing tables. Postgres: the schema belongs to the Alembic migrations
+    # in apps/coordinator/alembic, which the service runs before it starts (ExecStartPre).
+    if engine.dialect.name == "sqlite":
+        Base.metadata.create_all(engine)
 
     bus = EventBus()
     store = ArtifactStore(Path(settings.artifact_dir))
