@@ -23,7 +23,7 @@ from ekido_core.compiler import ProbeResult
 from ekido_core.signing import recover_document_signer, verify_document
 
 from . import jobs as job_service
-from .jobs import LineageError, StaleFencingToken
+from .jobs import LineageError, StaleFencingToken, StorageQuotaExceeded
 from .models import GpuHardware, Job, JobAssignment, Provider, Wallet
 from .orchestrator import Orchestrator
 
@@ -72,6 +72,7 @@ class AgentGateway:
         self.engine = engine
         self.connections: dict[str, Connection] = {}
         self.upload_tokens: dict[str, str] = {}
+        self.upload_budget = None  # An artifacts.UploadBudget, set by the app. A commit clears the provider's pending bytes.
         self.loop: asyncio.AbstractEventLoop | None = None
         self.orchestrator: Orchestrator = orchestrator_factory(self)
         self._pending_probes: dict[str, concurrent.futures.Future] = {}
@@ -301,6 +302,8 @@ class AgentGateway:
             await self._send(connection, "cmd.stop_run", {"reason": "STALE_FENCING_TOKEN", "current": exc.current}, job_id=job_id, fencing_token=token)
         except LineageError as exc:
             await self._send(connection, "error", {"error": "INVALID_LINEAGE", "detail": str(exc)})
+        except StorageQuotaExceeded as exc:
+            await self._send(connection, "error", {"error": "STORAGE_QUOTA", "detail": str(exc)})
 
     def _is_current(self, job_id: str, token: int) -> bool:
         with Session(self.engine) as session:
@@ -340,6 +343,8 @@ class AgentGateway:
             return
         signed = dict(manifest, signature=signature)
         checkpoint = await loop.run_in_executor(None, lambda: self.orchestrator.on_checkpoint(job_id, signed, fencing_token=token, signer=connection.worker_key))
+        if self.upload_budget is not None:
+            self.upload_budget.release(connection.provider_id)
         await loop.run_in_executor(None, self.orchestrator.check_probation, job_id, checkpoint, token)
 
     async def _on_exit(self, connection: Connection, loop, job_id: str, token: int, payload: dict) -> None:

@@ -36,7 +36,7 @@ from . import jobs as job_service
 from .agent_gateway import AgentGateway
 from .api_guard import ApiGuard
 from .rate_limit import RateLimiter
-from .artifacts import ArtifactError, ArtifactStore
+from .artifacts import ArtifactError, ArtifactStore, UploadBudget, UploadBudgetExceeded
 from .events import EventBus, events_after, record_event
 from .models import Base, Checkpoint, FaultInjection, GpuHardware, IdempotencyRecord, Job, JobBinding, Provider, ProviderKey, QualityDecision, RecoveryEvent, Settlement, Wallet
 from .orchestrator import Orchestrator, QualityLink
@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     rate_limit_writes_per_minute: int = 40
     cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3100", "http://127.0.0.1:3100"]
     artifact_dir: str = "data/artifacts"
+    # Checkpoint bytes one job may keep on disk at once, counted the way retention keeps them. 0 turns the cap off.
+    max_job_storage_bytes: int = 5 * 1024**3
+    # Bytes one provider may upload that no committed checkpoint references yet.
+    max_pending_upload_bytes: int = 2 * 1024**3
     verifier_addresses: str = ""  # Comma-separated. Empty means no quality gate, so jobs stop at VALIDATING.
     verifier_quorum: int = 2
     # Chain settings. With no RPC_URL or ESCROW_ADDRESS, the coordinator runs with no chain.
@@ -213,13 +217,17 @@ def job_view(job: Job) -> dict[str, Any]:
     }
 
 
+def create_engine_for(database_url: str) -> Engine:
+    kwargs: dict[str, Any] = {}
+    if database_url in ("sqlite://", "sqlite:///:memory:"):
+        kwargs = {"poolclass": StaticPool, "connect_args": {"check_same_thread": False}}
+    return create_engine(database_url, **kwargs)
+
+
 def create_app(settings: Settings | None = None, engine: Engine | None = None, quality: QualityLink | None = None) -> FastAPI:
     settings = settings or Settings()
     if engine is None:
-        kwargs: dict[str, Any] = {}
-        if settings.database_url in ("sqlite://", "sqlite:///:memory:"):
-            kwargs = {"poolclass": StaticPool, "connect_args": {"check_same_thread": False}}
-        engine = create_engine(settings.database_url, **kwargs)
+        engine = create_engine_for(settings.database_url)
     # Replaced by Alembic migrations once the schema settles. Harmless on existing tables.
     Base.metadata.create_all(engine)
 
@@ -229,6 +237,9 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
         quality = QuorumQuality({a.strip() for a in settings.verifier_addresses.split(",") if a.strip()}, settings.verifier_quorum)
     # Must come after quality is set: the gateway builds its orchestrator immediately.
     gateway = AgentGateway(engine, lambda link: Orchestrator(engine, bus, link, quality))
+    gateway.orchestrator.max_job_storage_bytes = settings.max_job_storage_bytes or None
+    upload_budget = UploadBudget(settings.max_pending_upload_bytes)
+    gateway.upload_budget = upload_budget
     if isinstance(quality, QuorumQuality):
         with Session(engine) as session:
             for row in session.scalars(select(QualityDecision)):
@@ -663,11 +674,20 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
         return {"job_id": job_id, "state": state}
 
     @app.put("/artifacts/{digest}", status_code=201)
-    async def put_artifact(digest: str, request: Request, _: str = Depends(require_artifact_token)) -> dict[str, Any]:
+    async def put_artifact(digest: str, request: Request, owner: str = Depends(require_artifact_token)) -> dict[str, Any]:
         try:
+            already = store.exists(digest)
+            if not already:
+                # The declared length is checked up front; without one, assume the largest blob the store accepts.
+                declared = request.headers.get("content-length")
+                upload_budget.check(owner, int(declared) if declared and declared.isdigit() else store.max_bytes)
             size = await store.put(digest, request.stream())
+        except UploadBudgetExceeded as exc:
+            raise HTTPException(status_code=413, detail=str(exc)) from exc
         except ArtifactError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        if not already:
+            upload_budget.record(owner, digest, size)
         return {"sha256": digest, "bytes": size}
 
     @app.get("/artifacts/{digest}")

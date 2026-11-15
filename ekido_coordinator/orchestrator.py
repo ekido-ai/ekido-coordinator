@@ -72,6 +72,7 @@ class Orchestrator:
         self.on_job_finished = None  # Set by the settlement service. Called with a job ID.
         self.on_job_started = None  # Called with a job ID once placement succeeds.
         self.on_recovered = None  # Called with (job ID, attempt, adaptation manifest hash).
+        self.max_job_storage_bytes: int | None = None  # Per-job checkpoint storage cap. Set from settings.
 
     # ------------------------------------------------------------- helpers
 
@@ -349,7 +350,9 @@ class Orchestrator:
         """Commit first, then mark verified. Fencing and lineage checks live in commit_checkpoint."""
         with Session(self.engine) as session:
             job = session.get(Job, job_id)
-            checkpoint = job_service.commit_checkpoint(session, job, manifest, fencing_token=fencing_token, signer=signer)
+            checkpoint = job_service.commit_checkpoint(
+                session, job, manifest, fencing_token=fencing_token, signer=signer, max_job_bytes=self.max_job_storage_bytes
+            )
             data = {"checkpoint_hash": checkpoint.manifest_hash, "step": checkpoint.logical_step, "signer": signer, "reason": None, "provider_id": self._provider_of(session, signer)}
             self._emit(session, "checkpoint.committed", job.id, data)
             if verified and checkpoint.state == "COMMITTED":

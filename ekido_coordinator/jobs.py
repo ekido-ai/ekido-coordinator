@@ -112,7 +112,14 @@ class LineageError(ValueError):
     pass
 
 
-def commit_checkpoint(session: Session, job: Job, manifest: dict, *, fencing_token: int, signer: str | None = None, run_id: str | None = None) -> Checkpoint:
+class StorageQuotaExceeded(ValueError):
+    pass
+
+
+def commit_checkpoint(
+    session: Session, job: Job, manifest: dict, *, fencing_token: int, signer: str | None = None, run_id: str | None = None,
+    max_job_bytes: int | None = None,
+) -> Checkpoint:
     """The atomic point of the checkpoint lifecycle. Idempotent for the same manifest."""
     require_current_token(job, fencing_token)
     if manifest.get("fencing_token") != fencing_token:
@@ -137,6 +144,14 @@ def commit_checkpoint(session: Session, job: Job, manifest: dict, *, fencing_tok
             raise LineageError("logical step must increase along the lineage")
 
     files = manifest.get("files", {})
+    new_bytes = sum(f.get("bytes", 0) for f in files.values())
+    if max_job_bytes is not None:
+        from .retention import job_live_bytes  # Local import: retention imports the models this module defines.
+
+        existing_rows = list(session.scalars(select(Checkpoint).where(Checkpoint.job_id == job.id)))
+        kept = job_live_bytes(existing_rows)
+        if kept + new_bytes > max_job_bytes:
+            raise StorageQuotaExceeded(f"this job would keep {kept + new_bytes} bytes of checkpoints, over its {max_job_bytes}-byte limit")
     checkpoint = Checkpoint(
         job_id=job.id,
         run_id=run_id,
@@ -144,7 +159,7 @@ def commit_checkpoint(session: Session, job: Job, manifest: dict, *, fencing_tok
         parent_hash=parent,
         logical_step=step,
         fencing_token=fencing_token,
-        size_bytes=sum(f.get("bytes", 0) for f in files.values()),
+        size_bytes=new_bytes,
         signer=signer,
         manifest=manifest,
     )
