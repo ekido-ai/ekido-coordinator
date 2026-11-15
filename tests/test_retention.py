@@ -111,7 +111,7 @@ class KeepSetAndQuarantine(unittest.TestCase):
             session.add(reuse)
             session.commit()
             keep = keep_set(session, NOW)
-        self.assertTrue(blobs("shared") <= keep)
+        self.assertEqual(blobs("shared") - keep, set())  # nothing the live job needs is missing
 
     def test_settled_job_keeps_the_verdicts_final_checkpoint(self):
         with Session(self.engine) as session:
