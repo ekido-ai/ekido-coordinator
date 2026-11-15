@@ -70,6 +70,7 @@ class SettlementService:
         self._propose_lock = threading.Lock()
         self._restore_lock = threading.Lock()
         self._restore_retry_after = 0.0
+        self._finalizing: set[str] = set()  # Jobs whose dispute window a thread is waiting out.
 
     # ------------------------------------------------------------ on-chain
 
@@ -211,6 +212,7 @@ class SettlementService:
     def _restore_pending(self) -> int:
         if self.chain is None:
             return 0
+        self._resume_attested()
         with Session(self.engine) as session:
             records = list(session.execute(select(Settlement, SettlementProposal, Job).join(SettlementProposal, SettlementProposal.job_id == Settlement.job_id).join(Job, Job.id == Settlement.job_id).where(Settlement.status == "AWAITING_SIGNATURES")))
             snapshots = [(row.job_id, row.verdict, proposal.inputs, job.onchain_id, job.state) for row, proposal, job in records]
@@ -341,16 +343,64 @@ class SettlementService:
                 raise ChainError("existing on-chain attestation requires reconciliation before finalizing")
             self._emit_tx(job_id, result)
             self._set_status(job_id, "ATTESTED", submit_tx=result.tx_hash)
-            onchain_id = task.verdict["jobId"]
-            self.wait_for_window(onchain_id)
-            result = self._finalize_with_retries(onchain_id)
-            self._emit_tx(job_id, result)
-            self._set_status(job_id, "SETTLED", finalize_tx=result.tx_hash)
-            self._finish_job(job_id, passed=task.verdict["passed"])
-        except Exception as exc:  # Web3 raises many types. All of them must reach the dashboard.
-            log.exception("settlement of job %s stopped", job_id)
-            self._set_status(job_id, "ERROR")
-            self.orchestrator.emit_live("chain.tx", job_id, {"action": "settlement", "tx_hash": None, "status": "FAILED", "chain_id": self.chain_id, "explorer_url": None, "local_chain": self.local_chain})
+            self._finalize_attested(job_id, task.verdict)
+        except Exception:  # Web3 raises many types. All of them must reach the dashboard.
+            self._settlement_failed(job_id)
+
+    def _finalize_attested(self, job_id: str, verdict: dict) -> None:
+        """Waits out the dispute window of an attested job, then finalizes it and closes the job."""
+        onchain_id = verdict["jobId"]
+        self.wait_for_window(onchain_id)
+        result = self._finalize_with_retries(onchain_id)
+        self._emit_tx(job_id, result)
+        self._set_status(job_id, "SETTLED", finalize_tx=result.tx_hash)
+        self._finish_job(job_id, passed=verdict["passed"])
+
+    def _settlement_failed(self, job_id: str) -> None:
+        log.exception("settlement of job %s stopped", job_id)
+        self._set_status(job_id, "ERROR")
+        self.orchestrator.emit_live("chain.tx", job_id, {"action": "settlement", "tx_hash": None, "status": "FAILED", "chain_id": self.chain_id, "explorer_url": None, "local_chain": self.local_chain})
+
+    def _resume_attested(self, *, wait: bool = False) -> int:
+        """Finalizes jobs attested before a restart. Their waiting thread died with the old process, so nothing else would.
+
+        Only a stored verdict that matches the chain's own record is finalized. A disputed or different attestation is
+        left alone for reconciliation.
+        """
+        with Session(self.engine) as session:
+            pending = [(row.job_id, row.verdict) for row in session.scalars(select(Settlement).where(Settlement.status == "ATTESTED"))]
+        started = []
+        for job_id, verdict in pending:
+            with self.lock:
+                if job_id in self._finalizing or job_id in self.tasks:
+                    continue
+            try:
+                if not self._attested_matches(verdict):
+                    continue
+            except Exception:
+                log.exception("couldn't check the attestation of job %s", job_id)
+                continue
+            with self.lock:
+                if job_id in self._finalizing:
+                    continue
+                self._finalizing.add(job_id)
+            thread = threading.Thread(target=self._resume_one, args=(job_id, verdict), daemon=True, name="settlement-resume")
+            thread.start()
+            started.append(thread)
+        if wait:
+            for thread in started:
+                thread.join()
+        return len(started)
+
+    def _resume_one(self, job_id: str, verdict: dict) -> None:
+        try:
+            log.info("resuming settlement of job %s after a restart", job_id)
+            self._finalize_attested(job_id, verdict)
+        except Exception:
+            self._settlement_failed(job_id)
+        finally:
+            with self.lock:
+                self._finalizing.discard(job_id)
 
     def _attested_matches(self, verdict: dict) -> bool:
         """Check the stored outcome and split before reconciling an already-attested job.

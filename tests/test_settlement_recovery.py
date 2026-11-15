@@ -6,6 +6,7 @@ from unittest.mock import Mock, patch
 
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
 
 from gpuchain_coordinator import jobs
 from gpuchain_coordinator.models import Base, Job, Settlement, SettlementProposal
@@ -14,7 +15,8 @@ from gpuchain_coordinator.settlement_service import SettlementService, VerdictTa
 
 class SettlementRecovery(unittest.TestCase):
     def setUp(self):
-        self.engine = create_engine("sqlite://")
+        # One shared connection, so the settlement thread sees the same in-memory database.
+        self.engine = create_engine("sqlite://", poolclass=StaticPool, connect_args={"check_same_thread": False})
         self.addCleanup(self.engine.dispose)
         Base.metadata.create_all(self.engine)
         with Session(self.engine) as session:
@@ -118,6 +120,41 @@ class SettlementRecovery(unittest.TestCase):
             service.settle(self.job_id)
         self.chain.ensure_finalized.assert_called()
         self.assertNotIn(unittest.mock.call(self.job_id, "ERROR"), service._set_status.call_args_list)
+
+    def _attested_row(self, passed: bool = True) -> dict:
+        verdict = {"jobId": "0x" + "1" * 64, "finalCheckpoint": "0x" + "ab" * 32, "passed": passed,
+                   "payees": [self.address], "amounts": [1_000_000], "refund": 4_000_000}
+        with Session(self.engine) as session:
+            session.get(Job, self.job_id).state = "COMPLETED" if passed else "FAILED"
+            session.add(Settlement(job_id=self.job_id, verdict=verdict, submit_tx="0x" + "5" * 64, status="ATTESTED"))
+            session.commit()
+        self.chain.job.return_value = {"state": "Attested", "final_checkpoint": "ab" * 32, "passed": passed,
+                                       "payees": [self.address], "amounts": [1_000_000], "refund": 4_000_000}
+        return verdict
+
+    def test_an_attestation_from_before_a_restart_is_finalized(self):
+        self._attested_row()
+        self.chain.seconds_until_dispute_end.return_value = 0
+        self.chain.ensure_finalized.return_value = Mock(status="DONE", tx_hash="0x" + "6" * 64)
+        restarted = self.service()
+        restarted.orchestrator = Mock()
+        self.assertEqual(restarted._resume_attested(wait=True), 1)
+        self.chain.ensure_finalized.assert_called_once_with("0x" + "1" * 64)
+        with Session(self.engine) as session:
+            row = session.scalar(select(Settlement).where(Settlement.job_id == self.job_id))
+            self.assertEqual((row.status, row.finalize_tx), ("SETTLED", "0x" + "6" * 64))
+            self.assertEqual(session.get(Job, self.job_id).state, "SETTLED")
+        self.assertEqual(restarted._resume_attested(wait=True), 0)
+
+    def test_a_disputed_or_different_attestation_is_not_resumed(self):
+        self._attested_row()
+        self.chain.job.return_value = dict(self.chain.job.return_value, state="Disputed")
+        self.assertEqual(self.service()._resume_attested(wait=True), 0)
+        self.chain.job.return_value = dict(self.chain.job.return_value, state="Attested", amounts=[2_000_000])
+        self.assertEqual(self.service()._resume_attested(wait=True), 0)
+        self.chain.job.side_effect = OSError("offline")
+        self.assertEqual(self.service()._resume_attested(wait=True), 0)
+        self.chain.ensure_finalized.assert_not_called()
 
     def test_a_different_attestation_on_chain_is_not_finalized(self):
         service = self.service()
