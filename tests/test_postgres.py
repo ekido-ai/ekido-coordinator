@@ -63,7 +63,7 @@ class OnPostgres(unittest.TestCase):
         job = jobs.create_job(self.session, spec={"template": "synthetic-linear/v1"}, policy={}, budget=Decimal("1"), deadline_seconds=600)
         self.session.add(Settlement(job_id=job.id, verdict={"accepted": True}, status="AWAITING_SIGNATURES"))
         self.session.commit()
-        widths = {c["name"]: c["type"].length for c in inspect(self.connection).get_columns("settlements")}
+        widths = {c["name"]: getattr(c["type"], "length", None) for c in inspect(self.connection).get_columns("settlements")}
         self.assertEqual(widths["status"], 32)
         stored = self.session.execute(select(Settlement.status).where(Settlement.job_id == job.id)).scalar_one()
         self.assertEqual(stored, "AWAITING_SIGNATURES")
