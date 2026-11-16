@@ -8,11 +8,11 @@ import os
 import unittest
 from decimal import Decimal
 
-from sqlalchemy import create_engine, inspect, text
+from sqlalchemy import create_engine, inspect, select, text
 from sqlalchemy.orm import Session
 
 from ekido_coordinator import jobs
-from ekido_coordinator.models import Base, Job, JobTransition
+from ekido_coordinator.models import Base, Job, JobTransition, Settlement
 
 URL = os.environ.get("TEST_DATABASE_URL", "")
 
@@ -57,6 +57,16 @@ class OnPostgres(unittest.TestCase):
         fresh = self.session.get(Job, job.id)
         self.assertEqual(fresh.spec["nested"], {"a": [1, 2]})
         self.assertEqual(fresh.budget, Decimal("5.123456"))
+
+    def test_long_status_values_fit(self):
+        # AWAITING_SIGNATURES (19 characters) stopped the live data copy on 16 Nov: it was a String(16) column.
+        job = jobs.create_job(self.session, spec={"template": "synthetic-linear/v1"}, policy={}, budget=Decimal("1"), deadline_seconds=600)
+        self.session.add(Settlement(job_id=job.id, verdict={"accepted": True}, status="AWAITING_SIGNATURES"))
+        self.session.commit()
+        widths = {c["name"]: getattr(c["type"], "length", None) for c in inspect(self.connection).get_columns("settlements")}
+        self.assertEqual(widths["status"], 32)
+        stored = self.session.execute(select(Settlement.status).where(Settlement.job_id == job.id)).scalar_one()
+        self.assertEqual(stored, "AWAITING_SIGNATURES")
 
 
 if __name__ == "__main__":
