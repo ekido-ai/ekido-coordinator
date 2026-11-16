@@ -36,6 +36,7 @@ from ekido_core.signing import verify_document
 from . import jobs as job_service
 from .agent_gateway import AgentGateway
 from .api_guard import ApiGuard
+from .public_view import Redactor, load_identities
 from .rate_limit import RateLimiter
 from .artifacts import ArtifactError, ArtifactStore, S3Blobs, UploadBudget, UploadBudgetExceeded
 from .events import EventBus, events_after, record_event
@@ -325,7 +326,9 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
         monitor.cancel()
 
     app = FastAPI(title="Ekido Coordinator", version="0.1.0", lifespan=lifespan)
-    app.add_middleware(ApiGuard, token=settings.api_token, allowed_origins=settings.cors_origins, open_api=settings.open_api, public_read=settings.public_read)
+    # A public server shows job pages to anyone, with provider identities replaced (public_view.py, decision 8).
+    redactor = Redactor(lambda: load_identities(engine), secret=settings.api_token) if settings.public_read else None
+    app.add_middleware(ApiGuard, token=settings.api_token, allowed_origins=settings.cors_origins, open_api=settings.open_api, public_read=settings.public_read, redactor=redactor)
     app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"], allow_headers=["*"])
     # Outermost, so a flood is refused before any other work is done.
     app.add_middleware(RateLimiter, reads_per_minute=settings.rate_limit_reads_per_minute, writes_per_minute=settings.rate_limit_writes_per_minute, enabled=settings.rate_limit_enabled)

@@ -99,22 +99,36 @@ class ApiGuardTest(unittest.TestCase):
         self.assertEqual(TestClient(build(), **LOCAL).get("/settlements").json(), [])
         self.assertEqual(TestClient(build(), **REMOTE).get("/settlements").status_code, 401)
 
-    def test_a_public_server_shows_only_health_and_fees(self):
-        # Hide providers: nothing that names, lists or counts providers is readable without the operator token.
+    def test_a_public_server_shows_jobs_but_never_who_the_providers_are(self):
+        # Hide providers (decision 8): the provider list, settlements and chain logs need the operator token.
+        # Job pages are public again, through the redactor (tests/test_public_view.py checks what it hides).
         client = TestClient(build(public_read=True), **REMOTE)
-        for path in ("/healthz", "/fees"):
+        for path in ("/healthz", "/fees", "/jobs"):
             with self.subTest(path=path):
                 self.assertEqual(client.get(path).status_code, 200)
         self.assertNotEqual(client.get("/readyz").status_code, 401)
-        for path in ("/providers", "/jobs", "/jobs/x/timeline", "/jobs/x/recoveries", "/jobs/x/checkpoints", "/settlements", "/chain/logs"):
+        for path in ("/jobs/x", "/jobs/x/timeline", "/jobs/x/recoveries", "/jobs/x/checkpoints", "/jobs/x/settlement-preview"):
+            with self.subTest(path=path):
+                self.assertNotEqual(client.get(path).status_code, 401)
+        for path in ("/providers", "/settlements", "/chain/logs", "/jobs/x/other"):
             with self.subTest(path=path):
                 self.assertEqual(client.get(path).status_code, 401)
         for method, path in (("POST", "/jobs"), ("POST", "/demo/faults"), ("POST", "/jobs/x/cancel"), ("POST", "/providers")):
             with self.subTest(path=path):
                 self.assertEqual(client.request(method, path, json={}).status_code, 401)
-        with self.assertRaises(WebSocketDisconnect):  # The live job stream carries provider identities.
-            with TestClient(build(public_read=True), base_url="http://192.168.1.20:8000", client=("192.168.1.50", 50000)).websocket_connect("ws://192.168.1.20:8000/ws/jobs/x") as socket:
+        with self.assertRaises(WebSocketDisconnect):  # Only the per-job stream is public; nothing else over WebSocket.
+            with TestClient(build(public_read=True), base_url="http://192.168.1.20:8000", client=("192.168.1.50", 50000)).websocket_connect("ws://192.168.1.20:8000/ws/other") as socket:
                 socket.receive_text()
+
+    def test_a_public_job_page_never_shows_a_provider_name(self):
+        app = build(public_read=True)
+        operator = TestClient(app, **LOCAL)
+        created = operator.post("/providers", json={"name": "alice-rtx3060", "kind": "REAL", "wallet_address": "0x" + "ab" * 20, "price_per_step": "0.001"})
+        self.assertIn(created.status_code, (200, 201), created.text)
+        public = TestClient(app, **REMOTE)
+        self.assertEqual(public.get("/providers").status_code, 401)
+        self.assertNotIn("alice-rtx3060", public.get("/jobs").text)
+        self.assertIn("alice-rtx3060", operator.get("/providers").text)  # the operator still sees it
 
     def test_the_operator_still_sees_everything_on_a_public_server(self):
         client = TestClient(build(public_read=True, api_token="op-token"), **REMOTE)
