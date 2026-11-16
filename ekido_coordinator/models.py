@@ -36,7 +36,7 @@ class Wallet(Timestamped, Base):
     __tablename__ = "wallets"
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id"))
     address: Mapped[str] = mapped_column(String(42), unique=True)  # Stored lowercase.
-    role: Mapped[str] = mapped_column(String(16))  # client, provider, verifier or arbiter.
+    role: Mapped[str] = mapped_column(String(32))  # client, provider, verifier or arbiter.
 
 
 class GpuHardware(Timestamped, Base):
@@ -55,9 +55,9 @@ class Provider(Timestamped, Base):
     __tablename__ = "providers"
     wallet_id: Mapped[str] = mapped_column(ForeignKey("wallets.id"))
     name: Mapped[str] = mapped_column(String(120))
-    status: Mapped[str] = mapped_column(String(16), default="OFFLINE")
+    status: Mapped[str] = mapped_column(String(32), default="OFFLINE")
     # REAL, CAPPED_PROFILE or INJECTED_FAULT. Drives the truth badge, so the UI can't hide it.
-    kind: Mapped[str] = mapped_column(String(16), default="REAL")
+    kind: Mapped[str] = mapped_column(String(32), default="REAL")
     physical_gpu_id: Mapped[str | None] = mapped_column(ForeignKey("gpu_hardware.id"))
     capacity_mib: Mapped[int | None] = mapped_column(Integer)  # The enforced cap for capped profiles.
     price_per_step: Mapped[Decimal] = mapped_column(Numeric(20, 6), default=Decimal("0"))
@@ -88,7 +88,7 @@ class Worker(Timestamped, Base):
     session_pubkey: Mapped[str | None] = mapped_column(String(42))
     mode: Mapped[str] = mapped_column(String(8), default="docker")
     last_seen: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    state: Mapped[str] = mapped_column(String(16), default="OFFLINE")
+    state: Mapped[str] = mapped_column(String(32), default="OFFLINE")
 
 
 class Benchmark(Timestamped, Base):
@@ -113,7 +113,7 @@ class Job(Timestamped, Base):
     policy_hash: Mapped[str] = mapped_column(String(64))
     budget: Mapped[Decimal] = mapped_column(Numeric(20, 6))
     deadline: Mapped[datetime] = mapped_column(DateTime(timezone=True))
-    state: Mapped[str] = mapped_column(String(16), default="OPEN")
+    state: Mapped[str] = mapped_column(String(32), default="OPEN")
     # Optimistic lock: every state change must name the version it read.
     state_version: Mapped[int] = mapped_column(Integer, default=0)
     # Only ever increases. A write carrying an older token comes from a zombie worker and is refused.
@@ -147,8 +147,8 @@ class JobTransition(Timestamped, Base):
     __table_args__ = (UniqueConstraint("job_id", "seq"),)
     job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"))
     seq: Mapped[int] = mapped_column(Integer)
-    from_state: Mapped[str] = mapped_column(String(16))
-    to_state: Mapped[str] = mapped_column(String(16))
+    from_state: Mapped[str] = mapped_column(String(32))
+    to_state: Mapped[str] = mapped_column(String(32))
     reason: Mapped[str | None] = mapped_column(Text)
     actor: Mapped[str | None] = mapped_column(String(64))
 
@@ -172,7 +172,7 @@ class JobAssignment(Timestamped, Base):
     provider_id: Mapped[str] = mapped_column(ForeignKey("providers.id"))
     attempt: Mapped[int] = mapped_column(Integer)
     fencing_token: Mapped[int] = mapped_column(BigInteger)
-    state: Mapped[str] = mapped_column(String(16), default="ASSIGNED")
+    state: Mapped[str] = mapped_column(String(32), default="ASSIGNED")
     exec_config: Mapped[dict | None] = mapped_column(JSON)
 
 
@@ -182,7 +182,7 @@ class TrainingRun(Timestamped, Base):
     start_step: Mapped[int] = mapped_column(Integer)
     end_step: Mapped[int | None] = mapped_column(Integer)
     accepted_steps: Mapped[int] = mapped_column(Integer, default=0)
-    status: Mapped[str] = mapped_column(String(16), default="RUNNING")
+    status: Mapped[str] = mapped_column(String(32), default="RUNNING")
 
 
 class Checkpoint(Timestamped, Base):
@@ -194,7 +194,7 @@ class Checkpoint(Timestamped, Base):
     logical_step: Mapped[int] = mapped_column(Integer)
     fencing_token: Mapped[int] = mapped_column(BigInteger)
     # COMMITTED -> VERIFIED -> ACCEPTED or REJECTED.
-    state: Mapped[str] = mapped_column(String(16), default="COMMITTED")
+    state: Mapped[str] = mapped_column(String(32), default="COMMITTED")
     size_bytes: Mapped[int | None] = mapped_column(BigInteger)
     signer: Mapped[str | None] = mapped_column(String(42))
     manifest: Mapped[dict] = mapped_column(JSON)
@@ -221,7 +221,7 @@ class AdaptationManifest(Timestamped, Base):
     target_provider_id: Mapped[str | None] = mapped_column(ForeignKey("providers.id"))
     manifest: Mapped[dict] = mapped_column(JSON)
     manifest_hash: Mapped[str] = mapped_column(String(64))
-    verdict: Mapped[str] = mapped_column(String(16))
+    verdict: Mapped[str] = mapped_column(String(32))
     reject_reason: Mapped[str | None] = mapped_column(Text)
 
 
@@ -235,7 +235,7 @@ class QualityEvaluation(Timestamped, Base):
     metrics: Mapped[dict] = mapped_column(JSON)
     correctness_hash: Mapped[str | None] = mapped_column(String(64))
     ci_lower: Mapped[float] = mapped_column(Float)
-    verdict: Mapped[str] = mapped_column(String(8))
+    verdict: Mapped[str] = mapped_column(String(32))
     report_hash: Mapped[str] = mapped_column(String(64))
     sig: Mapped[str] = mapped_column(String(132))
 
@@ -255,7 +255,7 @@ class EscrowRef(Timestamped, Base):
     chain_id: Mapped[int] = mapped_column(BigInteger)
     contract: Mapped[str] = mapped_column(String(42))
     create_tx: Mapped[str | None] = mapped_column(String(66))
-    state: Mapped[str] = mapped_column(String(16), default="Funded")
+    state: Mapped[str] = mapped_column(String(32), default="Funded")
 
 
 class Settlement(Timestamped, Base):
@@ -264,7 +264,7 @@ class Settlement(Timestamped, Base):
     verdict: Mapped[dict] = mapped_column(JSON)
     submit_tx: Mapped[str | None] = mapped_column(String(66))
     finalize_tx: Mapped[str | None] = mapped_column(String(66))
-    status: Mapped[str] = mapped_column(String(16), default="PENDING")
+    status: Mapped[str] = mapped_column(String(32), default="PENDING")
 
 
 class SettlementProposal(Timestamped, Base):
@@ -299,7 +299,7 @@ class TelemetrySample(Timestamped, Base):
     step: Mapped[int | None] = mapped_column(Integer)
     loss: Mapped[float | None] = mapped_column(Float)
     steps_per_s: Mapped[float | None] = mapped_column(Float)
-    source: Mapped[str] = mapped_column(String(16), default="HOST_NVML")
+    source: Mapped[str] = mapped_column(String(32), default="HOST_NVML")
 
 
 class FaultInjection(Timestamped, Base):
@@ -318,7 +318,7 @@ class OutboxItem(Timestamped, Base):
     kind: Mapped[str] = mapped_column(String(32))
     payload: Mapped[dict] = mapped_column(JSON)
     key: Mapped[str] = mapped_column(String(128), unique=True)
-    status: Mapped[str] = mapped_column(String(16), default="PENDING")
+    status: Mapped[str] = mapped_column(String(32), default="PENDING")
     attempts: Mapped[int] = mapped_column(Integer, default=0)
 
 
