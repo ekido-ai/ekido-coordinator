@@ -64,6 +64,15 @@ class RedactorTest(unittest.TestCase):
         r = redactor()
         self.assertEqual(r.scrub("alice-rtx30601"), "alice-rtx30601")
 
+    def test_a_providers_quote_signature_is_hidden(self):
+        # Anyone can recover the signing key from a signature, which would undo the labels.
+        r = redactor()
+        sig = "0x" + "ab" * 65
+        out = r.scrub({"spec": {"provider_terms": [{"quote": {"contract": "0x1bf6", "signature": sig}}]}, "client_signature": {"signature": sig}})
+        self.assertNotIn(sig, json.dumps(out["spec"]))
+        self.assertEqual(out["spec"]["provider_terms"][0]["quote"]["contract"], "0x1bf6")
+        self.assertEqual(out["client_signature"]["signature"], sig)  # signatures outside provider_terms are left alone
+
     def test_labels_cannot_be_reproduced_without_the_secret(self):
         self.assertNotEqual(Redactor(lambda: {}, secret="a").label(PID), Redactor(lambda: {}, secret="b").label(PID))
 

@@ -29,6 +29,10 @@ IDENTITY_KEYS = frozenset({
     "wallet_address", "worker_key", "worker_id", "enrolled_key", "session_pubkey", "payees",
 })
 # Not "name": recipes, models and datasets have names too. Provider names are caught as known identities instead.
+# Inside these containers a provider signed something; anyone can recover the signer's key from a signature, so
+# signatures there are hidden too (a provider's quote in a job's provider_terms).
+PROVIDER_SIGNED = frozenset({"provider_terms"})
+SIGNATURE_KEYS = frozenset({"signature", "sig", "quote_signature"})
 # Identity strings shorter than this are matched only as whole values, never inside text, to avoid false hits.
 MIN_TEXT_MATCH = 4
 
@@ -81,11 +85,17 @@ class Redactor:
     def _key(self, key: Any) -> Any:
         return self._text(key) if isinstance(key, str) else key
 
-    def scrub(self, data: Any) -> Any:
+    def scrub(self, data: Any, signed: bool = False) -> Any:
         if isinstance(data, dict):
-            return {self._key(k): (self._forced(v) if k in IDENTITY_KEYS else self.scrub(v)) for k, v in data.items()}
+            out = {}
+            for k, v in data.items():
+                if k in IDENTITY_KEYS or (signed and k in SIGNATURE_KEYS):
+                    out[self._key(k)] = self._forced(v)
+                else:
+                    out[self._key(k)] = self.scrub(v, signed or k in PROVIDER_SIGNED)
+            return out
         if isinstance(data, list):
-            return [self.scrub(v) for v in data]
+            return [self.scrub(v, signed) for v in data]
         if isinstance(data, str):
             return self._text(data)
         return data
