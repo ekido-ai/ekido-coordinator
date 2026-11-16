@@ -7,7 +7,6 @@ Created: 2026-11-16 15:46:09.094307
 
 from alembic import op
 import sqlalchemy as sa
-from sqlalchemy.dialects import sqlite
 
 revision = '0002'
 down_revision = '0001'
@@ -27,7 +26,7 @@ def downgrade() -> None:
     op.create_table('orgs',
     sa.Column('id', sa.VARCHAR(length=32), nullable=False),
     sa.Column('name', sa.VARCHAR(length=80), nullable=False),
-    sa.Column('created_at', sa.DATETIME(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.PrimaryKeyConstraint('id')
     )
     op.create_table('org_members',
@@ -35,7 +34,7 @@ def downgrade() -> None:
     sa.Column('user_id', sa.VARCHAR(length=36), nullable=False),
     sa.Column('role', sa.VARCHAR(length=16), nullable=False),
     sa.Column('id', sa.VARCHAR(length=36), nullable=False),
-    sa.Column('created_at', sa.DATETIME(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['org_id'], ['orgs.id'], ),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
     sa.PrimaryKeyConstraint('id'),
@@ -51,7 +50,7 @@ def downgrade() -> None:
     sa.Column('granted', sa.BOOLEAN(), nullable=False),
     sa.Column('policy_version', sa.VARCHAR(length=40), nullable=False),
     sa.Column('id', sa.VARCHAR(length=36), nullable=False),
-    sa.Column('created_at', sa.DATETIME(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
     sa.PrimaryKeyConstraint('id')
     )
@@ -71,10 +70,10 @@ def downgrade() -> None:
     op.create_table('web_sessions',
     sa.Column('user_id', sa.VARCHAR(length=36), nullable=False),
     sa.Column('token_hash', sa.VARCHAR(length=64), nullable=False),
-    sa.Column('expires_at', sa.DATETIME(), nullable=False),
-    sa.Column('revoked_at', sa.DATETIME(), nullable=True),
+    sa.Column('expires_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('revoked_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('id', sa.VARCHAR(length=36), nullable=False),
-    sa.Column('created_at', sa.DATETIME(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('token_hash')
@@ -85,10 +84,10 @@ def downgrade() -> None:
     op.create_table('login_tokens',
     sa.Column('email', sa.VARCHAR(length=320), nullable=False),
     sa.Column('token_hash', sa.VARCHAR(length=64), nullable=False),
-    sa.Column('expires_at', sa.DATETIME(), nullable=False),
-    sa.Column('used_at', sa.DATETIME(), nullable=True),
+    sa.Column('expires_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('used_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('id', sa.VARCHAR(length=36), nullable=False),
-    sa.Column('created_at', sa.DATETIME(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('token_hash')
     )
@@ -102,11 +101,11 @@ def downgrade() -> None:
     sa.Column('mode', sa.VARCHAR(length=8), nullable=False),
     sa.Column('prefix', sa.VARCHAR(length=16), nullable=False),
     sa.Column('key_hash', sa.VARCHAR(length=64), nullable=False),
-    sa.Column('scopes', sqlite.JSON(), nullable=False),
+    sa.Column('scopes', sa.JSON(), nullable=False),
     sa.Column('created_by', sa.VARCHAR(length=36), nullable=False),
-    sa.Column('created_at', sa.DATETIME(), nullable=False),
-    sa.Column('last_used_at', sa.DATETIME(), nullable=True),
-    sa.Column('revoked_at', sa.DATETIME(), nullable=True),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
+    sa.Column('last_used_at', sa.DateTime(timezone=True), nullable=True),
+    sa.Column('revoked_at', sa.DateTime(timezone=True), nullable=True),
     sa.ForeignKeyConstraint(['created_by'], ['users.id'], ),
     sa.ForeignKeyConstraint(['org_id'], ['orgs.id'], ),
     sa.PrimaryKeyConstraint('id'),
@@ -118,9 +117,9 @@ def downgrade() -> None:
     op.create_table('user_emails',
     sa.Column('user_id', sa.VARCHAR(length=36), nullable=False),
     sa.Column('email', sa.VARCHAR(length=320), nullable=False),
-    sa.Column('verified_at', sa.DATETIME(), nullable=True),
+    sa.Column('verified_at', sa.DateTime(timezone=True), nullable=True),
     sa.Column('id', sa.VARCHAR(length=36), nullable=False),
-    sa.Column('created_at', sa.DATETIME(), nullable=False),
+    sa.Column('created_at', sa.DateTime(timezone=True), nullable=False),
     sa.ForeignKeyConstraint(['user_id'], ['users.id'], ),
     sa.PrimaryKeyConstraint('id'),
     sa.UniqueConstraint('email')
