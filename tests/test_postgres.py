@@ -2,16 +2,16 @@
 
 SQLite accepts things Postgres refuses: over-long strings, loose types, some constraint orders. These tests push the
 main write paths through Postgres. Each test runs inside a transaction that is rolled back, so they leave no rows.
+The URL connects as the coordinator's own user, whose search_path is the `coordinator` schema.
 """
 import os
 import unittest
 from decimal import Decimal
 
-from sqlalchemy import create_engine, inspect, select
+from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.orm import Session
 
-from ekido_coordinator import accounts, jobs
-from ekido_coordinator.accounts import AccountError
+from ekido_coordinator import jobs
 from ekido_coordinator.models import Base, Job, JobTransition
 
 URL = os.environ.get("TEST_DATABASE_URL", "")
@@ -42,25 +42,13 @@ class OnPostgres(unittest.TestCase):
         existing = set(inspect(self.connection).get_table_names())
         self.assertEqual(set(Base.metadata.tables) - existing, set())
 
-    def test_accounts_flow(self):
-        token = accounts.start_login(self.session, "Asha@Example.com")
-        user, session_token = accounts.finish_login(self.session, token)
-        self.assertEqual(accounts.user_for_session(self.session, session_token), user.id)
-        org = accounts.create_org(self.session, user.id, "Asha's Clinic")
-        accounts.add_member(self.session, org.id, "staff@example.com", "member")
-        key, secret = accounts.create_api_key(self.session, org.id, user.id, "server", "live")
-        self.assertEqual(accounts.principal_for_key(self.session, secret).org_id, org.id)
-        self.assertEqual(len(accounts.org_view(self.session, org.id)["members"]), 2)
-        with self.assertRaises(AccountError):
-            accounts.finish_login(self.session, token)  # used once already
+    def test_the_account_tables_are_gone(self):
+        # Sign-in, teams and keys moved to the Platform API (migration 0002).
+        existing = set(inspect(self.connection).get_table_names())
+        self.assertFalse({"user_emails", "orgs", "api_keys", "web_sessions"} & existing)
 
-    def test_unique_email_is_enforced(self):
-        token = accounts.start_login(self.session, "x@example.com")
-        accounts.finish_login(self.session, token)
-        again = accounts.start_login(self.session, "X@example.com")
-        user, _ = accounts.finish_login(self.session, again)
-        rows = self.session.scalars(select(accounts.UserEmail).where(accounts.UserEmail.email == "x@example.com")).all()
-        self.assertEqual([r.user_id for r in rows], [user.id])
+    def test_tables_live_in_the_coordinator_schema(self):
+        self.assertEqual(self.connection.execute(text("select current_schema()")).scalar(), "coordinator")
 
     def test_jobs_keep_json_decimals_and_transitions(self):
         job = jobs.create_job(self.session, spec={"template": "synthetic-linear/v1", "nested": {"a": [1, 2]}}, policy={"q": 0.9}, budget=Decimal("5.123456"), deadline_seconds=600)
