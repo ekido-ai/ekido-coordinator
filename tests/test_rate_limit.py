@@ -83,5 +83,36 @@ class RateLimitTest(unittest.TestCase):
             rate_limit.MAX_TRACKED = old
 
 
+class BrowserReadableRefusalTest(unittest.TestCase):
+    """The real app: a refusal must reach the dashboard as a 429 it can read, not as a CORS network error."""
+
+    def app(self, reads):
+        from ekido_coordinator.main import Settings, create_app
+        return create_app(Settings(database_url="sqlite://", demo_mode=True, _env_file=None,
+                                   rate_limit_reads_per_minute=reads, cors_origins=["https://ekido.example"]))
+
+    def test_a_refusal_carries_cors_and_retry_after(self):
+        c = TestClient(self.app(reads=2), client=("203.0.113.7", 1))
+        origin = {"Origin": "https://ekido.example"}
+        statuses = [c.get("/healthz", headers=origin).status_code for _ in range(3)]
+        self.assertEqual(statuses[-1], 429)
+        refused = c.get("/healthz", headers=origin)
+        self.assertEqual(refused.status_code, 429)
+        self.assertEqual(refused.headers.get("access-control-allow-origin"), "https://ekido.example")
+        self.assertIn("retry-after", refused.headers.get("access-control-expose-headers", "").lower())
+        self.assertGreaterEqual(int(refused.headers["retry-after"]), 1)
+
+    def test_preflights_do_not_spend_the_read_budget(self):
+        c = TestClient(self.app(reads=2), client=("203.0.113.8", 1))
+        preflight = {"Origin": "https://ekido.example", "Access-Control-Request-Method": "GET"}
+        for _ in range(5):
+            self.assertEqual(c.options("/healthz", headers=preflight).status_code, 200)
+        self.assertEqual(c.get("/healthz", headers={"Origin": "https://ekido.example"}).status_code, 200)
+
+    def test_default_leaves_room_for_a_shared_network(self):
+        from ekido_coordinator.main import Settings
+        self.assertGreaterEqual(Settings(_env_file=None).rate_limit_reads_per_minute, 600)
+
+
 if __name__ == "__main__":
     unittest.main()
