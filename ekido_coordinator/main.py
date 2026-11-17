@@ -64,7 +64,9 @@ class Settings(BaseSettings):
     index_addresses: str = ""  # Comma-separated contract addresses.
     index_from_block: int = 0
     rate_limit_enabled: bool = True
-    rate_limit_reads_per_minute: int = 240
+    # Per client IP. Many people can share one IP (a college or office network), and one dashboard tab reads
+    # about 35 times a minute, so this leaves room for a classroom without letting one script flood the server.
+    rate_limit_reads_per_minute: int = 600
     rate_limit_writes_per_minute: int = 40
     cors_origins: list[str] = ["http://localhost:3000", "http://127.0.0.1:3000", "http://localhost:3100", "http://127.0.0.1:3100"]
     artifact_dir: str = "data/artifacts"
@@ -329,9 +331,11 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
     # A public server shows job pages to anyone, with provider identities replaced (public_view.py, decision 8).
     redactor = Redactor(lambda: load_identities(engine), secret=settings.api_token) if settings.public_read else None
     app.add_middleware(ApiGuard, token=settings.api_token, allowed_origins=settings.cors_origins, open_api=settings.open_api, public_read=settings.public_read, redactor=redactor)
-    app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"], allow_headers=["*"])
-    # Outermost, so a flood is refused before any other work is done.
+    # Refused before any other work is done...
     app.add_middleware(RateLimiter, reads_per_minute=settings.rate_limit_reads_per_minute, writes_per_minute=settings.rate_limit_writes_per_minute, enabled=settings.rate_limit_enabled)
+    # ...but inside CORS, so a browser can read a 429 and its Retry-After instead of seeing a network error,
+    # and CORS preflights never spend a client's read budget.
+    app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_methods=["*"], allow_headers=["*"], expose_headers=["Retry-After"])
     app.state.bus = bus
     app.state.engine = engine
     app.state.gateway = gateway
