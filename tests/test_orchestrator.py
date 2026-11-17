@@ -587,6 +587,58 @@ class QualityGuard(Fixture):
         self.assertNotEqual(self.state(), "COMPLETED")
         self.assertEqual(self.net.started[-1][1]["resume_from_hash"], good.manifest_hash)
 
+    def test_failed_final_recipe_quality_starts_refund_instead_of_retry(self):
+        self.started_job()
+        with Session(self.engine) as s:
+            job = s.get(Job, self.job_id)
+            job.spec = {**job.spec, "template": "llm-lora/v1"}
+            s.commit()
+        final = self.checkpoint(300, self.A)
+        self.quality.answers[final.manifest_hash] = "FAIL"
+        self.quality.decided_reports = {(self.job_id, final.manifest_hash): [
+            {'job_id': self.job_id, 'checkpoint_hash': final.manifest_hash, 'is_final': True,
+             'verdict': 'FAIL', 'reasons': ['BASE_MODEL_NOT_BEATEN']}]}
+        self.orch.on_job_finished = mock.Mock()
+        starts_before = len(self.net.started)
+        self.assertEqual(self.orch.on_run_finished(self.job_id, 1), "FAILED")
+        self.assertEqual(len(self.net.started), starts_before)
+        self.orch.on_job_finished.assert_called_once_with(self.job_id)
+        with Session(self.engine) as s:
+            self.assertEqual(s.get(Checkpoint, final.id).state, "REJECTED")
+
+    def test_invalid_final_recipe_checkpoint_still_uses_recovery(self):
+        self.started_job()
+        with Session(self.engine) as s:
+            job = s.get(Job, self.job_id)
+            job.spec = {**job.spec, "template": "llm-lora/v1"}
+            s.commit()
+        final = self.checkpoint(300, self.A)
+        self.quality.answers[final.manifest_hash] = "FAIL"
+        self.quality.decided_reports = {(self.job_id, final.manifest_hash): [
+            {'job_id': self.job_id, 'checkpoint_hash': final.manifest_hash, 'is_final': True,
+             'verdict': 'FAIL', 'reasons': ['INVALID_SIGNATURE']}]}
+        self.orch.on_job_finished = mock.Mock()
+        starts_before = len(self.net.started)
+        self.orch.on_run_finished(self.job_id, 1)
+        self.assertNotEqual(self.state(), 'COMPLETED')
+        self.assertGreater(len(self.net.started), starts_before)
+        self.orch.on_job_finished.assert_not_called()
+
+    def test_malformed_final_failure_reason_does_not_start_refund(self):
+        self.started_job()
+        with Session(self.engine) as s:
+            job = s.get(Job, self.job_id)
+            job.spec = {**job.spec, "template": "llm-lora/v1"}
+            s.commit()
+        final = self.checkpoint(300, self.A)
+        self.quality.answers[final.manifest_hash] = "FAIL"
+        self.quality.decided_reports = {(self.job_id, final.manifest_hash): [
+            {'job_id': self.job_id, 'checkpoint_hash': final.manifest_hash, 'is_final': True,
+             'verdict': 'FAIL', 'reasons': [{}]}]}
+        self.orch.on_job_finished = mock.Mock()
+        self.orch.on_run_finished(self.job_id, 1)
+        self.orch.on_job_finished.assert_not_called()
+
     def test_stale_worker_cannot_finish_the_job(self):
         self.started_job()
         self.orch.on_failure(self.job_id, provider_id=self.a, cause="PROCESS_EXIT", fencing_token=1)

@@ -24,7 +24,7 @@ from ekido_core.signing import order_signatures, recover_verdict_signer
 
 from . import jobs as job_service
 from .chain import ChainError, EscrowClient
-from .models import Job, JobBinding, ProviderKeyProof, Settlement, SettlementProposal, Wallet
+from .models import Checkpoint, Job, JobBinding, ProviderKeyProof, Settlement, SettlementProposal, Wallet
 
 DEADLINE_TOLERANCE_SECONDS = 60  # For clock differences between the client, this server and the chain.
 MIN_PUBLIC_DISPUTE_WINDOW_SECONDS = 3600
@@ -183,6 +183,19 @@ class SettlementService:
                     "budget": str(budget),
                     "expiry": expiry,
                 }
+                if job.spec.get("template") == "llm-lora/v1" and self.quality is not None:
+                    for candidate in session.scalars(select(Checkpoint).where(
+                            Checkpoint.job_id == job.id, Checkpoint.state == "REJECTED",
+                            Checkpoint.logical_step == job.spec["total_logical_steps"]).order_by(Checkpoint.created_at.desc())):
+                        reports = self.quality.decided_reports.get((job.id, candidate.manifest_hash), [])
+                        if reports and all(r.get("is_final") is True and r.get("verdict") == "FAIL"
+                                           and r.get("checkpoint_hash") == candidate.manifest_hash for r in reports):
+                            binding = session.scalar(select(JobBinding).where(JobBinding.job_id == job.id))
+                            if binding is not None:
+                                inputs["reports"] = reports
+                                inputs["failure_checkpoint_hash"] = candidate.manifest_hash
+                                inputs["job_binding"] = binding.document
+                            break
             else:
                 raise ValueError(f"job {job_id} hasn't ended (state {job.state})")
             verdict = verdict_from_inputs(inputs)

@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
 from ekido_coordinator import jobs
-from ekido_coordinator.models import Base, Job, Settlement, SettlementProposal
+from ekido_coordinator.models import Base, Checkpoint, Job, JobBinding, Settlement, SettlementProposal
 from ekido_coordinator.settlement_service import SettlementService, VerdictTask, verdict_from_inputs
 
 
@@ -88,6 +88,27 @@ class SettlementRecovery(unittest.TestCase):
         restarted = self.service()
         self.assertEqual(restarted.restore_pending(), 1)
         self.assertEqual(restarted.claim(self.address), inputs)
+
+    def test_failed_recipe_proposal_carries_final_failure_evidence(self):
+        digest = 'a' * 64
+        report = {'job_id': self.job_id, 'checkpoint_hash': digest, 'is_final': True, 'verdict': 'FAIL'}
+        binding = {'signature': 'client-proof'}
+        with Session(self.engine) as session:
+            job = session.get(Job, self.job_id)
+            job.spec = {'template': 'llm-lora/v1', 'total_logical_steps': 30}
+            session.add(Checkpoint(job_id=job.id, manifest_hash=digest, logical_step=30,
+                                   fencing_token=1, state='REJECTED', manifest={}))
+            session.add(JobBinding(job_id=job.id, client_address=self.address, document=binding))
+            session.commit()
+        service = self.service()
+        service.quality = Mock(decided_reports={(self.job_id, digest): [report]})
+        service.propose(self.job_id)
+        inputs = service.tasks[self.job_id].inputs
+        self.assertEqual(inputs['failure_checkpoint_hash'], digest)
+        self.assertEqual(inputs['reports'], [report])
+        self.assertEqual(inputs['job_binding'], binding)
+        self.assertEqual(inputs['refund'], '5.000000')
+        self.assertEqual(inputs['payouts'], {})
 
     def test_a_verdict_near_expiry_is_rebuilt_not_submitted(self):
         service = self.service()
