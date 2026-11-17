@@ -515,12 +515,29 @@ class Orchestrator:
             if job.state != JobState.VALIDATING.value:
                 return job.state
             if verdict != "PASS":
-                session.commit()
-                return self.on_candidate_rejected(job_id, checkpoint_hash, None, reasons or ["FINAL_EVALUATION_FAILED"])
-            checkpoint = session.scalar(select(Checkpoint).where(Checkpoint.job_id == job.id, Checkpoint.manifest_hash == checkpoint_hash))
-            checkpoint.state = "ACCEPTED"
-            self._emit(session, "checkpoint.accepted", job.id, {"checkpoint_hash": checkpoint_hash, "step": checkpoint.logical_step, "signer": checkpoint.signer, "reason": None})
-            self._move(session, job, JobState.COMPLETED, "Final checkpoint accepted by verifier quorum")
+                reports = getattr(self.quality, 'decided_reports', {}).get((job_id, checkpoint_hash), [])
+                quality_reasons = {'BELOW_ABSOLUTE_FLOOR', 'BASE_MODEL_NOT_BEATEN'}
+                recipe_failure = (job.spec.get('template') == 'llm-lora/v1' and bool(reports)
+                                  and all(r.get('is_final') is True and r.get('verdict') == 'FAIL'
+                                          and r.get('job_id') == job_id and r.get('checkpoint_hash') == checkpoint_hash
+                                          and isinstance(r.get('reasons'), list)
+                                          and all(isinstance(reason, str) for reason in r['reasons'])
+                                          and bool(quality_reasons.intersection(r['reasons'])) for r in reports))
+                if not recipe_failure:
+                    session.commit()
+                    return self.on_candidate_rejected(job_id, checkpoint_hash, None, reasons or ["FINAL_EVALUATION_FAILED"])
+                checkpoint = session.scalar(select(Checkpoint).where(Checkpoint.job_id == job.id, Checkpoint.manifest_hash == checkpoint_hash))
+                if checkpoint is None:
+                    raise ValueError(f"unknown checkpoint {checkpoint_hash}")
+                checkpoint.state = "REJECTED"
+                failed_reasons = sorted({reason for r in reports for reason in r['reasons']})
+                self._emit(session, "checkpoint.rejected", job.id, {"checkpoint_hash": checkpoint_hash, "step": checkpoint.logical_step, "signer": checkpoint.signer, "reason": ", ".join(failed_reasons)})
+                self._move(session, job, JobState.FAILED, "Final recipe quality check failed; full refund due")
+            else:
+                checkpoint = session.scalar(select(Checkpoint).where(Checkpoint.job_id == job.id, Checkpoint.manifest_hash == checkpoint_hash))
+                checkpoint.state = "ACCEPTED"
+                self._emit(session, "checkpoint.accepted", job.id, {"checkpoint_hash": checkpoint_hash, "step": checkpoint.logical_step, "signer": checkpoint.signer, "reason": None})
+                self._move(session, job, JobState.COMPLETED, "Final checkpoint accepted by verifier quorum")
             state = job.state
         self._notify_finished(job_id)
         return state
