@@ -6,13 +6,15 @@ import json
 import threading
 import time
 from dataclasses import dataclass
+import os
 from pathlib import Path
 
 from eth_account import Account
 from web3 import Web3
 
 STATES = ("None", "Funded", "Active", "Attested", "Disputed", "Settled", "Refunded", "Cancelled")
-DEFAULT_ARTIFACT = Path(__file__).resolve().parents[3] / "contracts" / "out" / "GPUChainEscrow.sol" / "GPUChainEscrow.json"
+# ESCROW_ARTIFACT points at the compiled escrow when the contracts aren't three folders up (a split-repo checkout).
+DEFAULT_ARTIFACT = Path(os.environ.get("ESCROW_ARTIFACT") or Path(__file__).resolve().parents[3] / "contracts" / "out" / "GPUChainEscrow.sol" / "GPUChainEscrow.json")
 
 
 class ChainError(RuntimeError):
