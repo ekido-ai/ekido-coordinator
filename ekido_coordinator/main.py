@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 import re
@@ -17,7 +18,7 @@ from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import and_, create_engine, func, or_, select
@@ -39,6 +40,7 @@ from .api_guard import ApiGuard
 from .public_view import Redactor, load_identities
 from .rate_limit import RateLimiter
 from .artifacts import ArtifactError, ArtifactStore, S3Blobs, UploadBudget, UploadBudgetExceeded
+from .model_bundle import bundle as model_bundle
 from .events import EventBus, events_after, record_event
 from .models import Base, Checkpoint, FaultInjection, GpuHardware, IdempotencyRecord, Job, JobBinding, Provider, ProviderKey, QualityDecision, RecoveryEvent, Settlement, Wallet
 from .orchestrator import Orchestrator, QualityLink
@@ -519,6 +521,35 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
     def timeline(job_id: str, after: int = 0, session: Session = Depends(get_session)) -> list[dict[str, Any]]:
         load_job(session, job_id)
         return events_after(session, job_id, after)
+
+    @app.get("/jobs/{job_id}/model")
+    def download_model(job_id: str, session: Session = Depends(get_session)) -> Response:
+        """The job's final accepted model as a zip: weights, manifest, workload and a script to try it."""
+        job = load_job(session, job_id)
+        checkpoint = session.scalars(
+            select(Checkpoint).where(Checkpoint.job_id == job_id, Checkpoint.state == "ACCEPTED").order_by(Checkpoint.logical_step.desc()).limit(1)
+        ).first()
+        if checkpoint is None:
+            raise HTTPException(status_code=404, detail="No accepted model yet. It appears once the final checkpoint passes the quality check.")
+        entry = (checkpoint.manifest.get("files") or {}).get("trainable.safetensors") or {}  # The GPCK/1 weights file. ekido_core.gpck needs torch, so it isn't imported here.
+        digest = entry.get("sha256")
+        if not isinstance(digest, str):
+            raise HTTPException(status_code=422, detail="the accepted checkpoint lists no trained weights")
+        try:
+            path = store.path_for(digest)
+            if path.is_file():
+                data = path.read_bytes()
+                if hashlib.sha256(data).hexdigest() != digest:
+                    raise HTTPException(status_code=500, detail="stored weights don't match their hash")
+            elif blobs is not None and blobs.exists(digest):
+                data = blobs.open(digest).read()
+            else:
+                raise HTTPException(status_code=404, detail="the model's weights are no longer stored")
+        except ArtifactError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        body = model_bundle(job.id, job.spec, checkpoint.manifest, checkpoint.manifest_hash, checkpoint.logical_step, data)
+        name = f"ekido-model-{job.id[:8]}.zip"
+        return Response(body, media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
     @app.get("/jobs/{job_id}/checkpoints")
     def checkpoints(job_id: str, session: Session = Depends(get_session)) -> list[dict[str, Any]]:
