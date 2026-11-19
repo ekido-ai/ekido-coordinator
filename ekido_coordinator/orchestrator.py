@@ -23,7 +23,7 @@ from ekido_core.job_states import JobState
 
 from . import jobs as job_service
 from .events import EventBus, record_event
-from .models import AdaptationManifest, Checkpoint, GpuHardware, Job, JobAssignment, Provider, ProviderReputation, RecoveryEvent, TrainingRun, Wallet
+from .models import AdaptationManifest, Checkpoint, GpuHardware, Job, JobAssignment, JobKey, Provider, ProviderReputation, RecoveryEvent, TrainingRun, Wallet
 from .scheduler import Candidate, Requirements, rank
 
 log = logging.getLogger(__name__)
@@ -74,6 +74,9 @@ class Orchestrator:
         self._qualified: dict[tuple[str, str, float | None], Decision] = {}
         self._probation_done: dict[str, int] = {}  # job -> fencing token already checked.
         self.on_job_finished = None  # Set by the settlement service. Called with a job ID.
+        # A13: when on, a run's config carries the job's public age key, so the runtime writes encrypted (GPCK/2) checkpoints. Off by default:
+        # the verifier must be able to read them first, or every job would fail verification and be refunded.
+        self.encrypt_checkpoints = False
         self.on_job_started = None  # Called with a job ID once placement succeeds.
         self.on_recovered = None  # Called with (job ID, attempt, adaptation manifest hash).
         self.max_job_storage_bytes: int | None = None  # Per-job checkpoint storage cap. Set from settings.
@@ -294,8 +297,13 @@ class Orchestrator:
             total += count * rate
         return total
 
+    def _job_recipient(self, job_id: str) -> str | None:
+        """The job's public key, if it has one that has not been destroyed. Never the secret half."""
+        with Session(self.engine) as session:
+            return session.scalar(select(JobKey.recipient).where(JobKey.job_id == job_id, JobKey.destroyed_at.is_(None)))
+
     def _run_config(self, job: Job, assignment: JobAssignment, provider: Provider, checkpoint: Checkpoint | None, adaptation_hash: str | None) -> dict:
-        return {
+        config = {
             "job_id": job.id,
             "attempt": assignment.attempt,
             "fencing_token": assignment.fencing_token,
@@ -308,6 +316,10 @@ class Orchestrator:
             "resume_from_hash": checkpoint.manifest_hash if checkpoint else None,
             "resume_manifest": checkpoint.manifest if checkpoint else None,
         }
+        recipient = self._job_recipient(job.id) if self.encrypt_checkpoints else None
+        if recipient:
+            config["job_recipient"] = recipient
+        return config
 
     def _launch(self, session: Session, job: Job, placement: Placement, checkpoint: Checkpoint | None, adaptation_hash: str | None) -> None:
         provider = session.get(Provider, placement.provider_id)
