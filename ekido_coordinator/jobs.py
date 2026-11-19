@@ -11,6 +11,7 @@ from sqlalchemy.orm import Session
 from ekido_core.canonical import document_hash
 from ekido_core.job_states import JobState, check_transition
 
+from . import job_keys
 from .models import Checkpoint, Job, JobAssignment, JobTransition, Provider, ProviderKey, ProviderKeyProof, new_id
 
 
@@ -56,6 +57,7 @@ def create_job(
     )
     session.add(job)
     session.flush()
+    job_keys.create_for_job(session, job.id)  # A12: a job's encryption key is made with the job
     return job
 
 

@@ -6,7 +6,7 @@ import uuid
 from datetime import datetime, timezone
 from decimal import Decimal
 
-from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, Numeric, String, Text, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, Boolean, DateTime, Float, ForeignKey, Integer, LargeBinary, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
@@ -122,6 +122,15 @@ class Job(Timestamped, Base):
 
     transitions: Mapped[list["JobTransition"]] = relationship(back_populates="job", order_by="JobTransition.seq")
 
+
+class JobKey(Timestamped, Base):
+    """A job's encryption key (ticket A12). The recipient is public; the identity exists here only wrapped by KMS."""
+
+    __tablename__ = "job_keys"
+    job_id: Mapped[str] = mapped_column(ForeignKey("jobs.id"), unique=True)
+    recipient: Mapped[str] = mapped_column(String(80))  # age1..., the public half
+    wrapped_identity: Mapped[bytes | None] = mapped_column(LargeBinary)  # None once destroyed (delete my data)
+    destroyed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 class JobBinding(Timestamped, Base):
     """Client-signed binding for a secure settlement; absent for legacy jobs."""
