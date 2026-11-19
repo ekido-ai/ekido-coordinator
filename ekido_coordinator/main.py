@@ -60,6 +60,8 @@ class Settings(BaseSettings):
     kms_key_id: str = "alias/ekido-data"
     kms_region: str = "ap-south-1"
     local_wrap_identity: str = ""  # an age secret key, for "local" only; empty means a throwaway key
+    # A13: send each run the job's public key so its checkpoints are written encrypted. Leave off until the verifier can read them.
+    encrypt_checkpoints: bool = False
     open_api: bool = False  # Only for a container whose port is published on 127.0.0.1, where clients never look local.
     # Protocol fee on accepted work, paid by the client on top. When set, every new job's spec must carry exactly these terms.
     protocol_fee_bps: int = 0
@@ -261,6 +263,7 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
     # Must come after quality is set: the gateway builds its orchestrator immediately.
     job_keys.configure(job_keys.make_wrapper(settings.job_key_wrap, key_id=settings.kms_key_id, region=settings.kms_region, local_identity=settings.local_wrap_identity))
     gateway = AgentGateway(engine, lambda link: Orchestrator(engine, bus, link, quality))
+    gateway.orchestrator.encrypt_checkpoints = settings.encrypt_checkpoints
     gateway.orchestrator.max_job_storage_bytes = settings.max_job_storage_bytes or None
     upload_budget = UploadBudget(settings.max_pending_upload_bytes)
     gateway.upload_budget = upload_budget
