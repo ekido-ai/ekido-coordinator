@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Protocol
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session
 
@@ -31,6 +31,10 @@ log = logging.getLogger(__name__)
 MAX_ATTEMPTS = 6
 DEFAULT_PROBATION_STEPS = 50
 
+
+# How many times a job's final checkpoint may fail evaluation (for reasons other than the recipe's quality bar) before
+# the job is stopped rather than retrained. Recipe-quality failures refund straight away and don't count here.
+MAX_FINAL_EVALUATIONS = 3
 
 class AgentLink(Protocol):
     """How the orchestrator reaches providers. The gateway implements it, and tests fake it. All calls block."""
@@ -524,6 +528,21 @@ class Orchestrator:
                                           and all(isinstance(reason, str) for reason in r['reasons'])
                                           and bool(quality_reasons.intersection(r['reasons'])) for r in reports))
                 if not recipe_failure:
+                    # A final checkpoint that keeps failing for a non-recipe reason (or with split verdicts) would
+                    # otherwise retrain and fail again until the deadline. After MAX_FINAL_EVALUATIONS, stop.
+                    total = job.spec.get("total_logical_steps")
+                    earlier = session.scalar(select(func.count()).select_from(Checkpoint).where(
+                        Checkpoint.job_id == job.id, Checkpoint.state == "REJECTED", Checkpoint.logical_step == total,
+                        Checkpoint.manifest_hash != checkpoint_hash)) or 0
+                    if earlier + 1 >= MAX_FINAL_EVALUATIONS:
+                        checkpoint = session.scalar(select(Checkpoint).where(Checkpoint.job_id == job.id, Checkpoint.manifest_hash == checkpoint_hash))
+                        if checkpoint is not None:
+                            checkpoint.state = "REJECTED"
+                            self._emit(session, "checkpoint.rejected", job.id, {"checkpoint_hash": checkpoint_hash, "step": checkpoint.logical_step,
+                                                                                "signer": checkpoint.signer, "reason": ", ".join(reasons or ["FINAL_EVALUATION_FAILED"])})
+                        state = self._abort(session, job, f"The final model failed evaluation {earlier + 1} times; stopping instead of retraining again")
+                        session.commit()
+                        return state
                     session.commit()
                     return self.on_candidate_rejected(job_id, checkpoint_hash, None, reasons or ["FINAL_EVALUATION_FAILED"])
                 checkpoint = session.scalar(select(Checkpoint).where(Checkpoint.job_id == job.id, Checkpoint.manifest_hash == checkpoint_hash))

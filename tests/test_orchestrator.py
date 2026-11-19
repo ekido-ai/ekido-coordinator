@@ -13,7 +13,7 @@ from ekido_core.compiler import ProbeResult
 from ekido_core.canonical import document_hash
 from ekido_coordinator import jobs
 from ekido_coordinator.events import EventBus, events_after
-from ekido_coordinator.models import AdaptationManifest, Base, Checkpoint, GpuHardware, Job, JobAssignment, Provider, ProviderReputation, RecoveryEvent, Wallet
+from ekido_coordinator.models import JobTransition, AdaptationManifest, Base, Checkpoint, GpuHardware, Job, JobAssignment, Provider, ProviderReputation, RecoveryEvent, Wallet
 from ekido_coordinator.orchestrator import MAX_ATTEMPTS, Orchestrator
 
 SPEC = {"template": "synthetic-linear/v1", "logical_batch_size": 32, "total_logical_steps": 300, "seed": 1}
@@ -586,6 +586,31 @@ class QualityGuard(Fixture):
         self.orch.on_run_finished(self.job_id, 1)
         self.assertNotEqual(self.state(), "COMPLETED")
         self.assertEqual(self.net.started[-1][1]["resume_from_hash"], good.manifest_hash)
+
+    @mock.patch("ekido_coordinator.orchestrator.MAX_FINAL_EVALUATIONS", 2)
+    def test_repeated_final_failures_stop_the_job_instead_of_retraining(self):
+        self.started_job()
+        good = self.checkpoint(100, self.A)
+        with Session(self.engine) as s:
+            s.get(Checkpoint, good.id).state = "ACCEPTED"
+            s.commit()
+        self.orch.on_job_finished = mock.Mock()
+        first = self.checkpoint(300, self.A, parent=good.manifest_hash, note="first")
+        self.quality.answers[first.manifest_hash] = "FAIL"
+        starts_before = len(self.net.started)
+        self.assertNotEqual(self.orch.on_run_finished(self.job_id, self.job().fencing_token), "FAILED")
+        self.assertGreater(len(self.net.started), starts_before)  # the first failure retrains, as before
+        self.orch.on_run_started(self.job_id, self.job().fencing_token)
+        second = self.checkpoint(300, self.A, parent=good.manifest_hash, note="second")
+        self.quality.answers[second.manifest_hash] = "FAIL"
+        starts_before = len(self.net.started)
+        self.assertEqual(self.orch.on_run_finished(self.job_id, self.job().fencing_token), "FAILED")
+        self.assertEqual(len(self.net.started), starts_before)  # the second stops instead of retraining
+        self.orch.on_job_finished.assert_called_once_with(self.job_id)
+        with Session(self.engine) as s:
+            self.assertEqual(s.get(Checkpoint, second.id).state, "REJECTED")
+            reasons = [t.reason for t in s.scalars(select(JobTransition).where(JobTransition.job_id == self.job_id))]
+        self.assertIn("The final model failed evaluation 2 times; stopping instead of retraining again", reasons)
 
     def test_failed_final_recipe_quality_starts_refund_instead_of_retry(self):
         self.started_job()
