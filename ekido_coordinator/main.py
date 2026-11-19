@@ -524,6 +524,14 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
             app.state.bus.publish(event)
         return job_view(job)
 
+    @app.post("/jobs/{job_id}/erase-key")
+    def erase_job_key(job_id: str, session: Session = Depends(get_session)) -> dict[str, Any]:
+        """Destroy a finished job's encryption key (the customer deleted their data). Operator API, called by the Platform's
+        erasure worker. A job that is still running is refused: destroying its key would break the run; ask again once it has ended."""
+        job = load_job(session, job_id)
+        if job.state not in job_keys.ENDED_JOB_STATES:
+            raise HTTPException(status_code=409, detail="this job has not ended; its key can be destroyed after it has")
+        return {"job_id": job.id, "state": job.state, "destroyed": job_keys.destroy(session, job.id)}
     @app.get("/jobs/{job_id}/timeline")
     def timeline(job_id: str, after: int = 0, session: Session = Depends(get_session)) -> list[dict[str, Any]]:
         load_job(session, job_id)
