@@ -103,3 +103,31 @@ def release_to_device(
         raise KeyRefused("BAD_RECIPIENT") from None
     finally:
         del identity
+
+
+def release_to_verifier(session: Session, *, job_id: str, verifier_recipient: str, wrapper: IdentityWrapper | None = None) -> bytes:
+    """The job identity, encrypted to a verifier's one-off recipient, so it can read the checkpoints it judges (ticket A12).
+
+    The caller must already have checked who the verifier is (a signed session) and that it holds a claimed evaluation of this job
+    (`QuorumQuality.is_working_on`). Refused like a device: no such job, an ended job, no key or a destroyed one, a bad recipient. A
+    job that is VALIDATING or COMPLETED still has a key to give: verification happens before it ends.
+    """
+    job = session.get(Job, job_id)
+    if job is None:
+        raise KeyRefused("NO_JOB")
+    if job.state in ENDED_JOB_STATES:
+        raise KeyRefused("JOB_ENDED")
+    row = session.scalar(select(JobKey).where(JobKey.job_id == job_id))
+    if row is None or row.destroyed_at is not None or row.wrapped_identity is None:
+        raise KeyRefused("NO_KEY")
+    try:
+        identity = jobkeys.unwrap_job_key(row.wrapped_identity, job_id, wrapper or get_wrapper()).identity
+    except JobKeyError:
+        log.error("job %s: could not unwrap its key", job_id)
+        raise KeyRefused("UNWRAP_FAILED") from None
+    try:
+        return jobkeys.encrypt_bytes(identity.encode("ascii"), verifier_recipient)
+    except JobKeyError:
+        raise KeyRefused("BAD_RECIPIENT") from None
+    finally:
+        del identity
