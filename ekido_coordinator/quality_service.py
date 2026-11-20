@@ -102,6 +102,19 @@ class QuorumQuality:
                     }
         return None
 
+    def is_working_on(self, verifier: str, job_id: str) -> bool:
+        """True while this verifier holds a claimed, undecided evaluation of this job that it has not reported on yet. That is the only
+        time it may be given the job's key (ticket A12): being on the allowlist alone is not enough."""
+        verifier = verifier.lower()
+        with self.lock:
+            for task in self.tasks.values():
+                if task.job_id != job_id or task.done.is_set() or verifier not in task.claimed_by:
+                    continue
+                if any(str(report.get("signer", "")).lower() == verifier for report in task.reports):
+                    continue
+                return True
+        return False
+
     def submit(self, task_id: str, report: dict) -> str | None:
         """Returns the decision if this report completed the quorum."""
         signer = str(report.get("signer", "")).lower()
