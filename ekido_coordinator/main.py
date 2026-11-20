@@ -85,6 +85,9 @@ class Settings(BaseSettings):
     # Chain settings. With no RPC_URL or ESCROW_ADDRESS, the coordinator runs with no chain.
     rpc_url: str = ""
     chain_id: int = 84532
+    # Jobs paid in rupees through the Platform (tickets C7, A5, A9). Both must be set to turn it on; off by default.
+    platform_url: str = ""
+    platform_internal_token: str = ""
     escrow_address: str = ""
     coordinator_private_key: str = ""
     explorer_url: str = ""
@@ -317,6 +320,20 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
         gateway.orchestrator.on_recovered = settlement.on_recovered
         settlement.restore_pending()
 
+    fiat = None
+    if settings.platform_url and settings.platform_internal_token:
+        from .fiat_settlement import FiatSettlement, HttpPlatformPayments
+
+        fiat = FiatSettlement(engine, HttpPlatformPayments(settings.platform_url, settings.platform_internal_token))
+        previous = gateway.orchestrator.on_job_finished
+
+        def finished(job_id: str) -> None:
+            if previous is not None:
+                previous(job_id)  # a crypto job still goes through the on-chain settlement
+            fiat.on_job_finished(job_id)  # raises when the Platform is down; the orchestrator logs it and the sweep retries
+
+        gateway.orchestrator.on_job_finished = finished
+
     if settings.index_enabled and settings.index_addresses:
         from .chain_index import ChainIndexer, RpcLogs
 
@@ -326,8 +343,20 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
     async def lifespan(_: FastAPI):
         bus.bind_loop(asyncio.get_running_loop())
         monitor = asyncio.create_task(gateway.monitor())
+
+        async def fiat_sweeper() -> None:
+            while True:  # finishes jobs whose settlement call failed (the Platform was down); both Platform calls are idempotent
+                await asyncio.sleep(300)
+                try:
+                    await asyncio.to_thread(fiat.sweep)
+                except Exception:
+                    logging.getLogger(__name__).exception("fiat settlement sweep failed")
+
+        sweeper = asyncio.create_task(fiat_sweeper()) if fiat is not None else None
         yield
         monitor.cancel()
+        if sweeper is not None:
+            sweeper.cancel()
 
     app = FastAPI(title="Ekido Coordinator", version="0.1.0", lifespan=lifespan)
     # A public server shows job pages to anyone, with provider identities replaced (public_view.py, decision 8).
@@ -341,6 +370,7 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
     app.state.bus = bus
     app.state.engine = engine
     app.state.gateway = gateway
+    app.state.fiat_settlement = fiat
     app.state.store = store
 
 
