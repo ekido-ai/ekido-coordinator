@@ -157,6 +157,7 @@ class JoinProviderRequest(StrictModel):
 
 JOIN_KIND = "gpuchain.provider_join.v1"
 JOIN_MAX_AGE_SECONDS = 300
+MAX_DATASET_BYTES = 20 * 1024 * 1024  # the Platform refuses larger datasets too (ekido-platform v1_datasets)
 JOIN_MAX_PRICE = Decimal("1")  # USDC per step. A typo shouldn't list a provider at a ruinous price.
 JOIN_MAX_PROVIDERS = 200
 JOIN_PER_MINUTE = 10
@@ -769,6 +770,19 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         if not already:
             upload_budget.record(owner, digest, size)
+        return {"sha256": digest, "bytes": size}
+
+    @app.put("/datasets/{digest}", status_code=201)
+    async def put_dataset(digest: str, request: Request) -> dict[str, Any]:
+        """A customer's training rows (dataset.jsonl), handed over by the Platform when a paid job starts. Operator API only
+        (ApiGuard): agents fetch it by hash through /artifacts like any blob. The store re-checks the hash before keeping it."""
+        declared = request.headers.get("content-length")
+        if declared is None or not declared.isdigit() or int(declared) > MAX_DATASET_BYTES:
+            raise HTTPException(status_code=413, detail=f"a dataset must declare its size and be at most {MAX_DATASET_BYTES} bytes")
+        try:
+            size = await store.put(digest, request.stream())
+        except ArtifactError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         return {"sha256": digest, "bytes": size}
 
     @app.get("/artifacts/{digest}")
