@@ -1,4 +1,8 @@
 """A failed probe's error text comes from the provider's machine and must not reach the API response."""
+try:  # job keys need a wrapper; see wrapper_setup.py
+    import wrapper_setup  # noqa: F401
+except ImportError:  # run as tests.<module> (the Postgres CI step)
+    from tests import wrapper_setup  # noqa: F401
 import unittest
 from unittest.mock import patch
 

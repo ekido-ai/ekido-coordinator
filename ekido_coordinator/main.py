@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     demo_mode: bool = False
     api_token: str = ""  # Lets another machine use the operator API. Empty means only this machine can.
     # How a job's encryption key is stored at rest (A12): "kms" on staging and live, "local" for tests and a laptop.
-    job_key_wrap: str = "local"
+    job_key_wrap: str = ""  # no default: startup refuses unless "kms", or "local" with LOCAL_WRAP_IDENTITY (tests and laptops)
     kms_key_id: str = "alias/ekido-data"
     kms_region: str = "ap-south-1"
     local_wrap_identity: str = ""  # an age secret key, for "local" only; empty means a throwaway key
@@ -92,6 +92,9 @@ class Settings(BaseSettings):
     # Chain settings. With no RPC_URL or ESCROW_ADDRESS, the coordinator runs with no chain.
     rpc_url: str = ""
     chain_id: int = 84532
+    # Jobs paid in rupees through the Platform (tickets C7, A5, A9). Both must be set to turn it on; off by default.
+    platform_url: str = ""
+    platform_internal_token: str = ""
     escrow_address: str = ""
     coordinator_private_key: str = ""
     explorer_url: str = ""
@@ -167,6 +170,7 @@ class JoinProviderRequest(StrictModel):
 
 JOIN_KIND = "gpuchain.provider_join.v1"
 JOIN_MAX_AGE_SECONDS = 300
+MAX_DATASET_BYTES = 20 * 1024 * 1024  # the Platform refuses larger datasets too (ekido-platform v1_datasets)
 JOIN_MAX_PRICE = Decimal("1")  # USDC per step. A typo shouldn't list a provider at a ruinous price.
 JOIN_MAX_PROVIDERS = 200
 JOIN_PER_MINUTE = 10
@@ -331,6 +335,20 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
         gateway.orchestrator.on_recovered = settlement.on_recovered
         settlement.restore_pending()
 
+    fiat = None
+    if settings.platform_url and settings.platform_internal_token:
+        from .fiat_settlement import FiatSettlement, HttpPlatformPayments
+
+        fiat = FiatSettlement(engine, HttpPlatformPayments(settings.platform_url, settings.platform_internal_token))
+        previous = gateway.orchestrator.on_job_finished
+
+        def finished(job_id: str) -> None:
+            if previous is not None:
+                previous(job_id)  # a crypto job still goes through the on-chain settlement
+            fiat.on_job_finished(job_id)  # raises when the Platform is down; the orchestrator logs it and the sweep retries
+
+        gateway.orchestrator.on_job_finished = finished
+
     if settings.index_enabled and settings.index_addresses:
         from .chain_index import ChainIndexer, RpcLogs
 
@@ -340,8 +358,20 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
     async def lifespan(_: FastAPI):
         bus.bind_loop(asyncio.get_running_loop())
         monitor = asyncio.create_task(gateway.monitor())
+
+        async def fiat_sweeper() -> None:
+            while True:  # finishes jobs whose settlement call failed (the Platform was down); both Platform calls are idempotent
+                await asyncio.sleep(300)
+                try:
+                    await asyncio.to_thread(fiat.sweep)
+                except Exception:
+                    logging.getLogger(__name__).exception("fiat settlement sweep failed")
+
+        sweeper = asyncio.create_task(fiat_sweeper()) if fiat is not None else None
         yield
         monitor.cancel()
+        if sweeper is not None:
+            sweeper.cancel()
 
     app = FastAPI(title="Ekido Coordinator", version="0.1.0", lifespan=lifespan)
     # A public server shows job pages to anyone, with provider identities replaced (public_view.py, decision 8).
@@ -355,6 +385,7 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
     app.state.bus = bus
     app.state.engine = engine
     app.state.gateway = gateway
+    app.state.fiat_settlement = fiat
     app.state.store = store
 
 
@@ -753,6 +784,19 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         if not already:
             upload_budget.record(owner, digest, size)
+        return {"sha256": digest, "bytes": size}
+
+    @app.put("/datasets/{digest}", status_code=201)
+    async def put_dataset(digest: str, request: Request) -> dict[str, Any]:
+        """A customer's training rows (dataset.jsonl), handed over by the Platform when a paid job starts. Operator API only
+        (ApiGuard): agents fetch it by hash through /artifacts like any blob. The store re-checks the hash before keeping it."""
+        declared = request.headers.get("content-length")
+        if declared is None or not declared.isdigit() or int(declared) > MAX_DATASET_BYTES:
+            raise HTTPException(status_code=413, detail=f"a dataset must declare its size and be at most {MAX_DATASET_BYTES} bytes")
+        try:
+            size = await store.put(digest, request.stream())
+        except ArtifactError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         return {"sha256": digest, "bytes": size}
 
     @app.get("/artifacts/{digest}")
