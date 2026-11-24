@@ -1,4 +1,4 @@
-"""Per-job encryption keys: made with the job, released only to the device that is assigned to it (ticket A12).
+﻿"""Per-job encryption keys: made with the job, released only to the device that is assigned to it (ticket A12).
 
 A job's key is an age X25519 keypair (`ekido_core.jobkeys`). Its public half (the recipient) is stored in the clear.
 Its secret half (the identity) is stored only wrapped by KMS, bound to the job id. To let a device decrypt, the
@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+import re
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -41,16 +42,19 @@ _wrapper: IdentityWrapper | None = None
 
 
 def make_wrapper(mode: str, *, key_id: str = jobkeys.KMS_KEY_ALIAS, region: str = "ap-south-1", local_identity: str = "") -> IdentityWrapper:
-    """`kms` for staging and live; `local` for tests and a laptop. A local wrapper with no configured key is
-    ephemeral: wrapped keys cannot be unwrapped after a restart, so never use it where data must outlive the process."""
+    """`kms` for staging and live; `local` for tests and a laptop, and only with a configured identity.
+
+    This fails closed. A wrapper whose key disappears when the process stops would make every job's data unreadable after the
+    next restart, with no error until someone tries to decrypt, so there is no default and no throwaway key: an empty mode,
+    `local` without `LOCAL_WRAP_IDENTITY`, or anything else is refused here, at startup."""
     if mode == "kms":
         return jobkeys.KmsWrapper.from_boto3(region_name=region, key_id=key_id)
     if mode == "local":
         if not local_identity:
-            log.warning("job keys are wrapped with an ephemeral local key; set JOB_KEY_WRAP=kms outside tests")
-        return jobkeys.LocalWrapper(local_identity or None)
-    raise ValueError(f"unknown job key wrapper {mode!r}; use 'kms' or 'local'")
-
+            raise ValueError("JOB_KEY_WRAP=local needs LOCAL_WRAP_IDENTITY (an age secret key), or job keys cannot be read after a restart; use JOB_KEY_WRAP=kms on a server")
+        return jobkeys.LocalWrapper(local_identity)
+    shown = mode if re.fullmatch(r"[A-Za-z_-]{0,12}", mode) else "<hidden: not a mode name>"  # a secret pasted into this setting must never be echoed
+    raise ValueError(f"JOB_KEY_WRAP must be set to 'kms' (servers) or 'local' with LOCAL_WRAP_IDENTITY (tests and laptops); got {shown!r}")
 
 def configure(wrapper: IdentityWrapper) -> None:
     global _wrapper
@@ -58,11 +62,10 @@ def configure(wrapper: IdentityWrapper) -> None:
 
 
 def get_wrapper() -> IdentityWrapper:
-    global _wrapper
+    """The configured wrapper. There is no lazy fallback: tests call `configure()` (tests/conftest.py does), the app does at startup."""
     if _wrapper is None:
-        _wrapper = make_wrapper("local")
+        raise RuntimeError("job keys have no wrapper configured; call job_keys.configure() (the app does this at startup)")
     return _wrapper
-
 
 def create_for_job(session: Session, job_id: str, wrapper: IdentityWrapper | None = None) -> JobKey:
     """Make and store a job's key. Called when the job is created."""
