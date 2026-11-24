@@ -1,6 +1,10 @@
 """C25: proofs are recorded, batched, anchored and checkable. The contract is faked here (same rules as ProofAnchor.sol);
 the last test runs the real contract on a local chain when `anvil` and the compiled contract are available."""
 
+try:  # job keys need a wrapper; see wrapper_setup.py
+    import wrapper_setup  # noqa: F401
+except ImportError:  # run as tests.<module> (the Postgres CI step)
+    from tests import wrapper_setup  # noqa: F401
 import json
 import os
 import shutil
