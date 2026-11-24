@@ -1,6 +1,9 @@
 """API tests against in-memory SQLite. Needs fastapi, httpx, sqlalchemy and pydantic-settings."""
 
-import wrapper_setup  # noqa: F401  (job keys need a wrapper; see wrapper_setup.py)
+try:  # job keys need a wrapper; see wrapper_setup.py
+    import wrapper_setup  # noqa: F401
+except ImportError:  # run as tests.<module> (the Postgres CI step)
+    from tests import wrapper_setup  # noqa: F401
 import copy
 import unittest
 from eth_account import Account

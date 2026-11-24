@@ -1,5 +1,8 @@
 """Checkpoint retention, quarantine, the per-job storage cap and the pending-upload budget."""
-import wrapper_setup  # noqa: F401  (job keys need a wrapper; see wrapper_setup.py)
+try:  # job keys need a wrapper; see wrapper_setup.py
+    import wrapper_setup  # noqa: F401
+except ImportError:  # run as tests.<module> (the Postgres CI step)
+    from tests import wrapper_setup  # noqa: F401
 import hashlib
 import os
 import tempfile

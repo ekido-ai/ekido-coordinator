@@ -4,7 +4,10 @@ SQLite accepts things Postgres refuses: over-long strings, loose types, some con
 main write paths through Postgres. Each test runs inside a transaction that is rolled back, so they leave no rows.
 The URL connects as the coordinator's own user, whose search_path is the `coordinator` schema.
 """
-import wrapper_setup  # noqa: F401  (job keys need a wrapper; see wrapper_setup.py)
+try:  # job keys need a wrapper; see wrapper_setup.py
+    import wrapper_setup  # noqa: F401
+except ImportError:  # run as tests.<module> (the Postgres CI step)
+    from tests import wrapper_setup  # noqa: F401
 import os
 import unittest
 from decimal import Decimal

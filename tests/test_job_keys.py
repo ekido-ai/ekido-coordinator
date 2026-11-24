@@ -1,6 +1,9 @@
 """A12: a job's key is made with the job and released only to the device assigned to it, in every case that matters."""
 
-import wrapper_setup  # noqa: F401  (job keys need a wrapper; see wrapper_setup.py)
+try:  # job keys need a wrapper; see wrapper_setup.py
+    import wrapper_setup  # noqa: F401
+except ImportError:  # run as tests.<module> (the Postgres CI step)
+    from tests import wrapper_setup  # noqa: F401
 import base64
 import logging
 import unittest

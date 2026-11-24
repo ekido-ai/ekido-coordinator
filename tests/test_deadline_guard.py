@@ -3,7 +3,10 @@
 The escrow contract accepts any deadline in the future, and anyone can refund the client an hour after it.
 The coordinator is where the lead time is enforced (see contracts/README.md).
 """
-import wrapper_setup  # noqa: F401  (job keys need a wrapper; see wrapper_setup.py)
+try:  # job keys need a wrapper; see wrapper_setup.py
+    import wrapper_setup  # noqa: F401
+except ImportError:  # run as tests.<module> (the Postgres CI step)
+    from tests import wrapper_setup  # noqa: F401
 import unittest
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
