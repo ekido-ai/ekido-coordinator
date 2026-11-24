@@ -1,4 +1,8 @@
 """Checkpoint retention, quarantine, the per-job storage cap and the pending-upload budget."""
+try:  # job keys need a wrapper; see wrapper_setup.py
+    import wrapper_setup  # noqa: F401
+except ImportError:  # run as tests.<module> (the Postgres CI step)
+    from tests import wrapper_setup  # noqa: F401
 import hashlib
 import os
 import tempfile
@@ -137,11 +141,12 @@ class KeepSetAndQuarantine(unittest.TestCase):
         self.assertEqual(set(result.move), blobs("early") | blobs("old-orphan"))
         self.assertEqual(result.young_orphans, 2)
 
-        # Apply with the real clock, so put the blobs' times back relative to now.
-        real_now = datetime.now(timezone.utc)
+        # Apply re-checks each blob's age against the real clock, while the plan uses NOW. Three days before NOW is old
+        # enough for both, on any day after NOW. (Stamping relative to the real clock broke this test once the real date
+        # passed NOW + 3 days: the blobs then looked newer than NOW and nothing was moved.)
         for label in ("early", "old-orphan"):
             for d in blobs(label):
-                stamp = (real_now - timedelta(days=3)).timestamp()
+                stamp = (NOW - timedelta(days=3)).timestamp()
                 os.utime(self.store.path_for(d), (stamp, stamp))
         summary = run(self.engine, self.store, apply=True, now=NOW)
         self.assertEqual(summary["moved"], 4)
