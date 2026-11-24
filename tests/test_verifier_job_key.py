@@ -1,5 +1,9 @@
 """A12: a verifier gets a job's key only for an evaluation it has claimed, only with a signed session."""
 
+try:  # job keys need a wrapper; see wrapper_setup.py
+    import wrapper_setup  # noqa: F401
+except ImportError:  # run as tests.<module> (the Postgres CI step)
+    from tests import wrapper_setup  # noqa: F401
 import base64
 import time
 import unittest
