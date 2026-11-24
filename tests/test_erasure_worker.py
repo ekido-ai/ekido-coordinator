@@ -1,5 +1,9 @@
 """A14/C17: the worker that destroys job keys for customers who deleted their data."""
 
+try:  # job keys need a wrapper; see wrapper_setup.py
+    import wrapper_setup  # noqa: F401
+except ImportError:  # run as tests.<module> (the Postgres CI step)
+    from tests import wrapper_setup  # noqa: F401
 import io
 import json
 import logging
