@@ -1,5 +1,6 @@
 """A signed provider message is not authority to control another provider's job."""
 
+import wrapper_setup  # noqa: F401  (job keys need a wrapper; see wrapper_setup.py)
 import unittest
 from decimal import Decimal
 from unittest.mock import AsyncMock, Mock

@@ -2,6 +2,7 @@
 
 Pure tests of the redactor plus the guard driven as a raw ASGI app, so they need no HTTP client library.
 """
+import wrapper_setup  # noqa: F401  (job keys need a wrapper; see wrapper_setup.py)
 import asyncio
 import json
 import unittest

@@ -1,4 +1,5 @@
 """Pending settlement proposals survive restart without trusting stale or changed data."""
+import wrapper_setup  # noqa: F401  (job keys need a wrapper; see wrapper_setup.py)
 import time
 import unittest
 from decimal import Decimal

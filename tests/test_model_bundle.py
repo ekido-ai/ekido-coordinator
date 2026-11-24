@@ -1,3 +1,4 @@
+import wrapper_setup  # noqa: F401  (job keys need a wrapper; see wrapper_setup.py)
 import io
 import json
 import unittest

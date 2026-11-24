@@ -1,5 +1,6 @@
 """A restarted agent generates a new worker key. Work signed with the old one must still be paid."""
 
+import wrapper_setup  # noqa: F401  (job keys need a wrapper; see wrapper_setup.py)
 import unittest
 from decimal import Decimal
 from types import SimpleNamespace

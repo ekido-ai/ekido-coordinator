@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     demo_mode: bool = False
     api_token: str = ""  # Lets another machine use the operator API. Empty means only this machine can.
     # How a job's encryption key is stored at rest (A12): "kms" on staging and live, "local" for tests and a laptop.
-    job_key_wrap: str = "local"
+    job_key_wrap: str = ""  # no default: startup refuses unless "kms", or "local" with LOCAL_WRAP_IDENTITY (tests and laptops)
     kms_key_id: str = "alias/ekido-data"
     kms_region: str = "ap-south-1"
     local_wrap_identity: str = ""  # an age secret key, for "local" only; empty means a throwaway key

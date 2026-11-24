@@ -1,5 +1,6 @@
 """A job paid in rupees is settled or refunded through the Platform when it ends."""
 
+import wrapper_setup  # noqa: F401  (job keys need a wrapper; see wrapper_setup.py)
 import io
 import unittest
 import urllib.error

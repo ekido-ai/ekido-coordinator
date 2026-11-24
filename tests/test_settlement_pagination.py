@@ -1,4 +1,5 @@
 """Settlement cursor paging must not omit ties or repeat rows after a new insert."""
+import wrapper_setup  # noqa: F401  (job keys need a wrapper; see wrapper_setup.py)
 import unittest
 from datetime import datetime, timedelta, timezone
 

@@ -1,4 +1,5 @@
 """A failed probe's error text comes from the provider's machine and must not reach the API response."""
+import wrapper_setup  # noqa: F401  (job keys need a wrapper; see wrapper_setup.py)
 import unittest
 from unittest.mock import patch
 

@@ -1,4 +1,5 @@
 """Direct checkpoint transfers through presigned S3 links, with the old routes kept for older workers."""
+import wrapper_setup  # noqa: F401  (job keys need a wrapper; see wrapper_setup.py)
 import asyncio
 import base64
 import hashlib

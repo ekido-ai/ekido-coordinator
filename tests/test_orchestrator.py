@@ -1,5 +1,6 @@
 """The demo's story, against a fake GPU network. Real compiler, scheduler, database and fencing."""
 
+import wrapper_setup  # noqa: F401  (job keys need a wrapper; see wrapper_setup.py)
 import os
 import unittest
 from decimal import Decimal

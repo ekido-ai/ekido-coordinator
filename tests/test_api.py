@@ -1,5 +1,6 @@
 """API tests against in-memory SQLite. Needs fastapi, httpx, sqlalchemy and pydantic-settings."""
 
+import wrapper_setup  # noqa: F401  (job keys need a wrapper; see wrapper_setup.py)
 import copy
 import unittest
 from eth_account import Account

@@ -1,5 +1,6 @@
 """State machine, fencing, lineage and payouts, on in-memory SQLite. Needs sqlalchemy."""
 
+import wrapper_setup  # noqa: F401  (job keys need a wrapper; see wrapper_setup.py)
 import unittest
 from decimal import Decimal
 

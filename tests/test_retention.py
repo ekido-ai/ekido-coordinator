@@ -1,4 +1,5 @@
 """Checkpoint retention, quarantine, the per-job storage cap and the pending-upload budget."""
+import wrapper_setup  # noqa: F401  (job keys need a wrapper; see wrapper_setup.py)
 import hashlib
 import os
 import tempfile

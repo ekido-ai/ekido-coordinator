@@ -1,5 +1,6 @@
 """A12: a job's key is made with the job and released only to the device assigned to it, in every case that matters."""
 
+import wrapper_setup  # noqa: F401  (job keys need a wrapper; see wrapper_setup.py)
 import base64
 import logging
 import unittest
@@ -221,10 +222,53 @@ class NothingUnwrappedInLogsTests(Fixture, unittest.IsolatedAsyncioTestCase):
 
 
 class WrapperConfigTests(unittest.TestCase):
-    def test_modes(self):
-        self.assertIsInstance(job_keys.make_wrapper("local"), jobkeys.LocalWrapper)
-        with self.assertRaises(ValueError):
-            job_keys.make_wrapper("plaintext")
+    def test_a_local_wrapper_needs_a_configured_identity_and_other_modes_are_refused(self):
+        identity = str(jobkeys.x25519.Identity.generate())
+        self.assertIsInstance(job_keys.make_wrapper("local", local_identity=identity), jobkeys.LocalWrapper)
+        for mode, identity_arg in (("local", ""), ("", ""), ("", identity), ("plaintext", identity), ("KMS", "")):
+            with self.subTest(mode=mode, identity=bool(identity_arg)):
+                with self.assertRaises(ValueError):
+                    job_keys.make_wrapper(mode, local_identity=identity_arg)
+
+    def test_the_error_says_what_to_set_and_never_shows_a_key(self):
+        identity = str(jobkeys.x25519.Identity.generate())
+        with self.assertRaises(ValueError) as caught:
+            job_keys.make_wrapper("local")
+        self.assertIn("LOCAL_WRAP_IDENTITY", str(caught.exception))
+        self.assertIn("JOB_KEY_WRAP", str(caught.exception))
+        self.assertNotIn("AGE-SECRET-KEY", str(caught.exception))
+        with self.assertRaises(ValueError) as caught:
+            job_keys.make_wrapper(identity)  # a secret pasted into the wrong setting must not be echoed
+        self.assertNotIn(identity, str(caught.exception))
+
+    def test_there_is_no_lazy_fallback_wrapper(self):
+        saved = job_keys._wrapper
+        job_keys._wrapper = None
+        try:
+            with self.assertRaises(RuntimeError):
+                job_keys.get_wrapper()
+        finally:
+            job_keys._wrapper = saved
+
+    def test_the_app_refuses_to_start_without_a_working_wrapper(self):
+        from ekido_coordinator.main import Settings, create_app
+
+        identity = str(jobkeys.x25519.Identity.generate())
+        saved = job_keys._wrapper
+        try:
+            for settings in (dict(job_key_wrap="local", local_wrap_identity=""), dict(job_key_wrap="", local_wrap_identity=""), dict(job_key_wrap="", local_wrap_identity=identity), dict(job_key_wrap="nope")):
+                with self.subTest(settings=settings):
+                    with self.assertRaises(ValueError):
+                        create_app(Settings(database_url="sqlite://", _env_file=None, **settings))
+            app = create_app(Settings(database_url="sqlite://", _env_file=None, job_key_wrap="local", local_wrap_identity=identity))
+            self.assertIsNotNone(app)
+        finally:
+            job_keys._wrapper = saved
+
+    def test_the_default_setting_is_not_local(self):
+        from ekido_coordinator.main import Settings
+
+        self.assertEqual(Settings.model_fields["job_key_wrap"].default, "")
 
     def test_local_wrapper_with_a_configured_key_survives_a_restart(self):
         identity = str(jobkeys.x25519.Identity.generate())

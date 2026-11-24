@@ -1,5 +1,6 @@
 """A public verifier address must not let a stranger consume that verifier's tasks."""
 
+import wrapper_setup  # noqa: F401  (job keys need a wrapper; see wrapper_setup.py)
 import time
 import unittest
 

@@ -1,4 +1,5 @@
 """Public jobs must not start with an unusably short dispute window."""
+import wrapper_setup  # noqa: F401  (job keys need a wrapper; see wrapper_setup.py)
 import unittest
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal

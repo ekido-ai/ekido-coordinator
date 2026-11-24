@@ -1,4 +1,5 @@
 """PUT /datasets/{sha256}: the Platform hands over a paid job's training rows (ticket C9). Operator API only."""
+import wrapper_setup  # noqa: F401  (job keys need a wrapper; see wrapper_setup.py)
 import hashlib
 import tempfile
 import unittest

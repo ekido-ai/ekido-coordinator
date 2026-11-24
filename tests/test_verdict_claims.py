@@ -1,4 +1,5 @@
 """A verifier can retry a verdict after a temporary failure without duplicating signatures."""
+import wrapper_setup  # noqa: F401  (job keys need a wrapper; see wrapper_setup.py)
 import unittest
 from unittest.mock import patch
 
