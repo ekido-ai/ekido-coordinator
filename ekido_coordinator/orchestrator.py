@@ -70,6 +70,8 @@ class Orchestrator:
         self.bus = bus
         self.agents = agents
         self.quality = quality
+        self._evaluating: set[str] = set()  # jobs whose final check is being asked right now
+        self._evaluating_lock = threading.Lock()
         # (provider, workload key) -> what real probes found. In memory: a restart simply measures again.
         self._qualified: dict[tuple[str, str, float | None], Decision] = {}
         self._probation_done: dict[str, int] = {}  # job -> fencing token already checked.
@@ -513,17 +515,46 @@ class Orchestrator:
                 return self.on_failure(job.id, provider_id=None, cause="NO_FINAL_CHECKPOINT", fencing_token=fencing_token)
             if self.quality is None:
                 return job.state
-            reference = job_service.latest_accepted_checkpoint(session, job)
-            tip_hash = tip.manifest_hash
-            reference_hash = reference.manifest_hash if reference else None
             session.commit()
-            try:
-                verdict = self.quality.evaluate(job.id, tip_hash, reference_hash, is_final=True)
-            except Exception as exc:
-                # No quorum isn't a pass. The job stays in VALIDATING, and the money stays locked.
-                self._emit(session, "failure.warning", job.id, {"rule": "NO_VERIFIER_QUORUM", "detail": str(exc)[:200]})
-                return job.state
-        return self.on_final_verdict(job_id, tip_hash, verdict)
+        return self.evaluate_final(job_id)
+
+    def pending_evaluations(self) -> list[str]:
+        """Jobs waiting for their final check."""
+        with Session(self.engine) as session:
+            return list(session.scalars(select(Job.id).where(Job.state == JobState.VALIDATING.value)))
+
+    def evaluate_final(self, job_id: str) -> str:
+        """Asks the verifiers about a VALIDATING job's last checkpoint and applies their answer. Safe to call again: a job
+        already being checked, or no longer VALIDATING, is left alone. The sweeper calls it for jobs whose check got no
+        quorum or was cut off by a restart; without that such a job waits forever, with the customer's money held."""
+        with self._evaluating_lock:
+            if job_id in self._evaluating:
+                return JobState.VALIDATING.value
+            self._evaluating.add(job_id)
+        try:
+            with Session(self.engine) as session:
+                job = session.get(Job, job_id)
+                if job.state != JobState.VALIDATING.value or self.quality is None:
+                    return job.state
+                tip = session.scalar(
+                    select(Checkpoint).where(Checkpoint.job_id == job.id, Checkpoint.state.in_(("VERIFIED", "ACCEPTED"))).order_by(Checkpoint.logical_step.desc()).limit(1)
+                )
+                if tip is None or tip.logical_step < job.spec["total_logical_steps"]:
+                    return job.state
+                reference = job_service.latest_accepted_checkpoint(session, job)
+                tip_hash = tip.manifest_hash
+                reference_hash = reference.manifest_hash if reference else None
+                session.commit()
+                try:
+                    verdict = self.quality.evaluate(job.id, tip_hash, reference_hash, is_final=True)
+                except Exception as exc:
+                    # No quorum isn't a pass. The job stays in VALIDATING, and the money stays locked.
+                    self._emit(session, "failure.warning", job.id, {"rule": "NO_VERIFIER_QUORUM", "detail": str(exc)[:200]})
+                    return job.state
+            return self.on_final_verdict(job_id, tip_hash, verdict)
+        finally:
+            with self._evaluating_lock:
+                self._evaluating.discard(job_id)
 
     def on_final_verdict(self, job_id: str, checkpoint_hash: str, verdict: str, reasons: list[str] | None = None) -> str:
         with Session(self.engine) as session:
