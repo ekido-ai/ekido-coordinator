@@ -1,4 +1,8 @@
 """PUT /datasets/{sha256}: the Platform hands over a paid job's training rows (ticket C9). Operator API only."""
+try:  # job keys need a wrapper; see wrapper_setup.py
+    import wrapper_setup  # noqa: F401
+except ImportError:  # run as tests.<module> (the Postgres CI step)
+    from tests import wrapper_setup  # noqa: F401
 import hashlib
 import tempfile
 import unittest

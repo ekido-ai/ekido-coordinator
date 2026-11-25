@@ -34,6 +34,7 @@ from ekido_core.protocol_fee import fee_amount, fee_terms, provider_budget
 from ekido_core.provider_meta import metadata_hash, provider_metadata
 from ekido_core.signing import verify_document
 
+from . import job_keys
 from . import jobs as job_service
 from .agent_gateway import AgentGateway
 from .api_guard import ApiGuard
@@ -54,6 +55,11 @@ class Settings(BaseSettings):
     database_url: str = "sqlite://"
     demo_mode: bool = False
     api_token: str = ""  # Lets another machine use the operator API. Empty means only this machine can.
+    # How a job's encryption key is stored at rest (A12): "kms" on staging and live, "local" for tests and a laptop.
+    job_key_wrap: str = ""  # no default: startup refuses unless "kms", or "local" with LOCAL_WRAP_IDENTITY (tests and laptops)
+    kms_key_id: str = "alias/ekido-data"
+    kms_region: str = "ap-south-1"
+    local_wrap_identity: str = ""  # an age secret key, for "local" only; empty means a throwaway key
     open_api: bool = False  # Only for a container whose port is published on 127.0.0.1, where clients never look local.
     # Protocol fee on accepted work, paid by the client on top. When set, every new job's spec must carry exactly these terms.
     protocol_fee_bps: int = 0
@@ -257,6 +263,7 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
     if quality is None and settings.verifier_addresses:
         quality = QuorumQuality({a.strip() for a in settings.verifier_addresses.split(",") if a.strip()}, settings.verifier_quorum)
     # Must come after quality is set: the gateway builds its orchestrator immediately.
+    job_keys.configure(job_keys.make_wrapper(settings.job_key_wrap, key_id=settings.kms_key_id, region=settings.kms_region, local_identity=settings.local_wrap_identity))
     gateway = AgentGateway(engine, lambda link: Orchestrator(engine, bus, link, quality))
     gateway.orchestrator.max_job_storage_bytes = settings.max_job_storage_bytes or None
     upload_budget = UploadBudget(settings.max_pending_upload_bytes)

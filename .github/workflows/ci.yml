@@ -39,7 +39,11 @@ jobs:
         env:
           PYTHONPATH: ${{ matrix.path }}
           PYTHONDONTWRITEBYTECODE: "1"
-        run: python -m unittest discover -s tests
+        # Job keys need a wrapper and the app refuses to start without one. The tests get a throwaway identity made here for this run only.
+        run: |
+          export JOB_KEY_WRAP=local
+          export LOCAL_WRAP_IDENTITY="$(python -c 'import pyrage; print(pyrage.x25519.Identity.generate())')"
+          python -m unittest discover -s tests
 
   postgres:
     name: Postgres

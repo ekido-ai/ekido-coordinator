@@ -7,6 +7,7 @@ every message. Sequence numbers stop replays. Agents dial out, so providers behi
 from __future__ import annotations
 
 import asyncio
+import base64
 import concurrent.futures
 import hashlib
 import logging
@@ -22,6 +23,7 @@ from sqlalchemy.orm import Session
 from ekido_core.compiler import ProbeResult
 from ekido_core.signing import recover_document_signer, verify_document
 
+from . import job_keys
 from . import jobs as job_service
 from .jobs import LineageError, StaleFencingToken, StorageQuotaExceeded
 from .models import GpuHardware, Job, JobAssignment, Provider, Wallet
@@ -293,6 +295,8 @@ class AgentGateway:
                     "failure.warning", job_id,
                     {"provider_id": connection.provider_id, "rule": payload.get("rule"), "detail": payload.get("detail"), "injected": bool(payload.get("injected"))},
                 )
+            elif kind == "job_key.request":
+                await self._on_key_request(connection, loop, job_id, token, payload)
             elif kind == "checkpoint.uploaded":
                 await self._on_checkpoint(connection, loop, job_id, token, payload)
             elif kind == "run.exited":
@@ -332,6 +336,24 @@ class AgentGateway:
         if connection.job_id:
             data = {k: payload.get(k) for k in ("util_pct", "mem_used_mib", "temp_c", "power_w", "source")}
             self.orchestrator.emit_live("telemetry.sample", connection.job_id, dict(data, provider_id=connection.provider_id))
+
+    async def _on_key_request(self, connection: Connection, loop, job_id: str, token: int, payload: dict) -> None:
+        """A device asks for the job's key, naming a one-off recipient it made for this assignment. By this point the
+        message is signed by the device's enrolled key and the assignment and fencing token have been checked. The key
+        goes back encrypted to that recipient, so it is useless to anyone who only sees the connection."""
+        recipient = payload.get("recipient")
+        provider_id = connection.provider_id
+
+        def release() -> bytes:
+            with Session(self.engine) as session:
+                return job_keys.release_to_device(session, job_id=job_id, provider_id=provider_id, fencing_token=token, agent_recipient=recipient if isinstance(recipient, str) else "")
+
+        try:
+            sealed = await loop.run_in_executor(None, release)
+        except job_keys.KeyRefused as refusal:
+            await self._send(connection, "error", {"error": "KEY_REFUSED", "reason": refusal.code}, job_id=job_id, fencing_token=token)
+            return
+        await self._send(connection, "job_key.release", {"ciphertext_b64": base64.b64encode(sealed).decode("ascii")}, job_id=job_id, fencing_token=token)
 
     async def _on_checkpoint(self, connection: Connection, loop, job_id: str, token: int, payload: dict) -> None:
         manifest, signature = payload.get("manifest"), payload.get("signature")

@@ -4,6 +4,10 @@ SQLite accepts things Postgres refuses: over-long strings, loose types, some con
 main write paths through Postgres. Each test runs inside a transaction that is rolled back, so they leave no rows.
 The URL connects as the coordinator's own user, whose search_path is the `coordinator` schema.
 """
+try:  # job keys need a wrapper; see wrapper_setup.py
+    import wrapper_setup  # noqa: F401
+except ImportError:  # run as tests.<module> (the Postgres CI step)
+    from tests import wrapper_setup  # noqa: F401
 import os
 import unittest
 from decimal import Decimal
@@ -67,6 +71,40 @@ class OnPostgres(unittest.TestCase):
         self.assertEqual(widths["status"], 32)
         stored = self.session.execute(select(Settlement.status).where(Settlement.job_id == job.id)).scalar_one()
         self.assertEqual(stored, "AWAITING_SIGNATURES")
+
+    def test_job_keys_table_stores_binary_wrapped_keys_once_per_job(self):
+        # A12: the wrapped identity is bytea, a job has at most one key, and a release works through Postgres.
+        from sqlalchemy.exc import IntegrityError
+
+        from ekido_core import jobkeys
+        from ekido_coordinator import job_keys
+        from ekido_coordinator.models import JobKey, Provider, Wallet
+
+        columns = {c["name"]: c for c in inspect(self.connection).get_columns("job_keys")}
+        self.assertEqual(set(columns), {"id", "created_at", "job_id", "recipient", "wrapped_identity", "destroyed_at"})
+        self.assertTrue(columns["wrapped_identity"]["nullable"])
+        job = jobs.create_job(self.session, spec={"template": "synthetic-linear/v1"}, policy={}, budget=Decimal("1"), deadline_seconds=600)
+        row = self.session.scalar(select(JobKey).where(JobKey.job_id == job.id))
+        self.assertIsInstance(bytes(row.wrapped_identity), bytes)
+        identity = job_keys.get_wrapper().unwrap(bytes(row.wrapped_identity), job.id)
+        self.assertNotIn(identity.encode(), bytes(row.wrapped_identity))
+        with self.session.begin_nested():
+            self.session.add(JobKey(job_id=job.id, recipient="age1x", wrapped_identity=b"\x00\x01"))
+            with self.assertRaises(IntegrityError):
+                self.session.flush()
+        wallet = Wallet(address="0x" + "b" * 40, role="provider")
+        self.session.add(wallet)
+        self.session.flush()
+        provider = Provider(name="A", wallet_id=wallet.id, kind="REAL")
+        other = Provider(name="B", wallet_id=wallet.id, kind="REAL")
+        self.session.add_all([provider, other])
+        self.session.flush()
+        assignment = jobs.assign(self.session, job, provider.id, {})
+        device = jobkeys.create_job_key()
+        sealed = job_keys.release_to_device(self.session, job_id=job.id, provider_id=provider.id, fencing_token=assignment.fencing_token, agent_recipient=device.recipient)
+        self.assertEqual(jobkeys.decrypt_bytes(sealed, device.identity).decode(), identity)
+        with self.assertRaises(job_keys.KeyRefused):
+            job_keys.release_to_device(self.session, job_id=job.id, provider_id=other.id, fencing_token=assignment.fencing_token, agent_recipient=device.recipient)
 
 
 if __name__ == "__main__":
