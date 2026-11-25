@@ -88,6 +88,14 @@ class Settle(unittest.TestCase):
         self.assertEqual(payouts, {self.keys["A"]: 1000, self.keys["B"]: 9000})
         self.assertEqual(self.platform.refunded, [])
 
+    def test_the_whole_provider_budget_is_shared_even_when_the_work_cost_less(self):
+        # The product rule written in the module docstring: steps x rate only sets each share, never the total.
+        job_id = self.job("COMPLETED", accepted=((1, "a"),))  # one step at 0.001: far less than the 10,000 paise budget
+        self.assertEqual(self.service.on_job_finished(job_id), "settled")
+        (_, payouts), = self.platform.settled
+        self.assertEqual(payouts, {self.keys["A"]: 10_000})
+        self.assertEqual(sum(payouts.values()), self.platform.budget)
+
     def test_a_failed_or_cancelled_job_refunds_the_customer(self):
         for state in ("FAILED", "CANCELLED"):
             job_id = self.job(state, accepted=((5, "a"),))
