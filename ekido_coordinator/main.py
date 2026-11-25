@@ -34,7 +34,7 @@ from ekido_core.protocol_fee import fee_amount, fee_terms, provider_budget
 from ekido_core.provider_meta import metadata_hash, provider_metadata
 from ekido_core.signing import verify_document
 
-from . import job_keys
+from . import distillations, job_keys
 from . import jobs as job_service
 from .agent_gateway import AgentGateway
 from .api_guard import ApiGuard
@@ -94,6 +94,8 @@ class Settings(BaseSettings):
     # Jobs paid in rupees through the Platform (tickets C7, A5, A9). Both must be set to turn it on; off by default.
     platform_url: str = ""
     platform_internal_token: str = ""
+    # Example generation (ticket #154). Off until a device can run it: while off, POST /distillations refuses, so no order waits on it.
+    distillation_enabled: bool = False
     escrow_address: str = ""
     coordinator_private_key: str = ""
     explorer_url: str = ""
@@ -101,6 +103,12 @@ class Settings(BaseSettings):
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class DistillationRequest(StrictModel):
+    distillation_id: str = Field(min_length=1, max_length=64)
+    spec: dict[str, Any]
+    seeds_jsonl: str = Field(min_length=1, max_length=4_000_000)
 
 
 class CreateJobRequest(StrictModel):
@@ -480,6 +488,16 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
             check("settlement_backlog", backlog)
         ready = all(c["ok"] for c in checks.values())
         return JSONResponse(status_code=200 if ready else 503, content={"status": "ready" if ready else "degraded", "checks": checks})
+
+    @app.post("/distillations", status_code=201)
+    def create_distillation(body: DistillationRequest, session: Session = Depends(get_session)) -> dict[str, Any]:
+        """The Platform asks for example generation (contract distill-gen/v1). The operator API: the same token and host rules as /jobs."""
+        try:
+            row = distillations.create(session, distillation_id=body.distillation_id, spec=body.spec, seeds_jsonl=body.seeds_jsonl,
+                                       enabled=settings.distillation_enabled)
+        except distillations.Refused as exc:
+            raise HTTPException(status_code=exc.status, detail=exc.detail) from None
+        return {"job_id": row.job_id}
 
     @app.post("/jobs", status_code=201)
     def create_job(body: CreateJobRequest, session: Session = Depends(get_session), idempotency_key: str | None = Header(default=None)) -> Any:
