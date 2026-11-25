@@ -1,4 +1,4 @@
-﻿"""Per-job encryption keys: made with the job, released only to the device that is assigned to it (ticket A12).
+"""Per-job encryption keys: made with the job, released only to the device that is assigned to it (ticket A12).
 
 A job's key is an age X25519 keypair (`ekido_core.jobkeys`). Its public half (the recipient) is stored in the clear.
 Its secret half (the identity) is stored only wrapped by KMS, bound to the job id. To let a device decrypt, the

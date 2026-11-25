@@ -132,6 +132,29 @@ class JobKey(Timestamped, Base):
     wrapped_identity: Mapped[bytes | None] = mapped_column(LargeBinary)  # None once destroyed (delete my data)
     destroyed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+class Proof(Timestamped, Base):
+    """A paid job's public proof (ticket C25): hashes only. `payouts` is the payout split in whole paise, kept here so the
+    proof can be rebuilt and checked; only its hash goes into the batch."""
+
+    __tablename__ = "proofs"
+    job_id: Mapped[str] = mapped_column(String(36), unique=True)
+    terms_hash: Mapped[str] = mapped_column(String(64))
+    verdict_hash: Mapped[str] = mapped_column(String(64))
+    payouts: Mapped[dict] = mapped_column(JSON)
+    batch_id: Mapped[str | None] = mapped_column(ForeignKey("proof_batches.id"), index=True)
+    leaf_index: Mapped[int | None] = mapped_column(Integer)
+
+
+class ProofBatch(Timestamped, Base):
+    """A group of proofs whose Merkle root is written to the ProofAnchor contract. PENDING until the write is confirmed."""
+
+    __tablename__ = "proof_batches"
+    root: Mapped[str] = mapped_column(String(64), unique=True)  # hex, no 0x
+    count: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16), default="PENDING")  # PENDING, ANCHORED or MISMATCH
+    tx_hash: Mapped[str | None] = mapped_column(String(66))
+    onchain_id: Mapped[int | None] = mapped_column(Integer)  # the batch id inside the contract
+
 class JobBinding(Timestamped, Base):
     """Client-signed binding for a secure settlement; absent for legacy jobs."""
 

@@ -9,6 +9,12 @@ A fiat job has no on-chain escrow: the customer's money is held by the Platform 
 - a job with no linked order (a crypto job) gets a 404 from the Platform and is ignored here.
 
 The split always adds up to the Platform's provider budget exactly (largest remainder), which is what the Platform demands.
+
+**Product rule, for whoever reads payouts later:** the WHOLE provider budget is shared out, even when the recorded work (steps x rate) comes to
+less than the budget. Steps x rate only decides each provider's *share*, not the total. This fits the fixed-price quote (the customer paid a
+fixed price for the finished job, so the providers who did the accepted work split what the quote set aside for them). The consequence is that a
+job which finishes early or cheaply does not refund its unspent budget to the customer; changing that is a business decision (the fee and GST
+on the unspent part, and the invoice, which is issued on the full amount), not a rounding detail. A job that earned nothing is refunded in full.
 Both Platform calls are idempotent, so a retry is safe. If the Platform cannot be reached the error is raised so the caller
 can log it; `sweep` finishes anything missed (run it from the same process on a timer).
 """
