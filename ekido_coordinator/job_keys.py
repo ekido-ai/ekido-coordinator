@@ -12,6 +12,7 @@ that has ended, a job that has ended, a key that was destroyed, and a recipient 
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 import re
 
 from sqlalchemy import select
@@ -106,6 +107,24 @@ def release_to_device(
         raise KeyRefused("BAD_RECIPIENT") from None
     finally:
         del identity
+
+def destroy(session: Session, job_id: str) -> bool:
+    """Forget a job's identity for good ("delete my data", ticket A14): the wrapped identity is removed and the time is recorded.
+    Everything encrypted to this job's key can then no longer be read by Ekido. Returns False if there was no key or it was already
+    destroyed, so repeating it is safe.
+
+    The limit that matters: this removes the key from the live database. A *backup* of the database taken earlier still holds the
+    wrapped identity, and the shared KMS key (`alias/ekido-data`) can still unwrap it. Making backups unreadable too needs the
+    identity wrapped under a key that belongs to the customer (or the job), with that KMS key scheduled for deletion at this point.
+    """
+    row = session.scalar(select(JobKey).where(JobKey.job_id == job_id))
+    if row is None or row.destroyed_at is not None:
+        return False
+    row.wrapped_identity = None
+    row.destroyed_at = datetime.now(timezone.utc)
+    session.commit()
+    log.info("job %s: its key was destroyed", job_id)
+    return True
 
 
 def release_to_verifier(session: Session, *, job_id: str, verifier_recipient: str, wrapper: IdentityWrapper | None = None) -> bytes:

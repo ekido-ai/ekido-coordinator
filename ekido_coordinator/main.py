@@ -35,7 +35,7 @@ from ekido_core.protocol_fee import fee_amount, fee_terms, provider_budget
 from ekido_core.provider_meta import metadata_hash, provider_metadata
 from ekido_core.signing import verify_document
 
-from . import job_keys
+from . import distillations, job_keys
 from . import jobs as job_service
 from .agent_gateway import AgentGateway
 from .api_guard import ApiGuard
@@ -61,6 +61,8 @@ class Settings(BaseSettings):
     kms_key_id: str = "alias/ekido-data"
     kms_region: str = "ap-south-1"
     local_wrap_identity: str = ""  # an age secret key, for "local" only; empty means a throwaway key
+    # A13: send each run the job's public key so its checkpoints are written encrypted. Leave off until the verifier can read them.
+    encrypt_checkpoints: bool = False
     open_api: bool = False  # Only for a container whose port is published on 127.0.0.1, where clients never look local.
     # Protocol fee on accepted work, paid by the client on top. When set, every new job's spec must carry exactly these terms.
     protocol_fee_bps: int = 0
@@ -95,6 +97,8 @@ class Settings(BaseSettings):
     # Jobs paid in rupees through the Platform (tickets C7, A5, A9). Both must be set to turn it on; off by default.
     platform_url: str = ""
     platform_internal_token: str = ""
+    # Example generation (ticket #154). Off until a device can run it: while off, POST /distillations refuses, so no order waits on it.
+    distillation_enabled: bool = False
     escrow_address: str = ""
     coordinator_private_key: str = ""
     explorer_url: str = ""
@@ -102,6 +106,12 @@ class Settings(BaseSettings):
 
 class StrictModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
+
+
+class DistillationRequest(StrictModel):
+    distillation_id: str = Field(min_length=1, max_length=64)
+    spec: dict[str, Any]
+    seeds_jsonl: str = Field(min_length=1, max_length=4_000_000)
 
 
 class CreateJobRequest(StrictModel):
@@ -272,6 +282,7 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
     # Must come after quality is set: the gateway builds its orchestrator immediately.
     job_keys.configure(job_keys.make_wrapper(settings.job_key_wrap, key_id=settings.kms_key_id, region=settings.kms_region, local_identity=settings.local_wrap_identity))
     gateway = AgentGateway(engine, lambda link: Orchestrator(engine, bus, link, quality))
+    gateway.orchestrator.encrypt_checkpoints = settings.encrypt_checkpoints
     gateway.orchestrator.max_job_storage_bytes = settings.max_job_storage_bytes or None
     upload_budget = UploadBudget(settings.max_pending_upload_bytes)
     gateway.upload_budget = upload_budget
@@ -488,6 +499,16 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
         ready = all(c["ok"] for c in checks.values())
         return JSONResponse(status_code=200 if ready else 503, content={"status": "ready" if ready else "degraded", "checks": checks})
 
+    @app.post("/distillations", status_code=201)
+    def create_distillation(body: DistillationRequest, session: Session = Depends(get_session)) -> dict[str, Any]:
+        """The Platform asks for example generation (contract distill-gen/v1). The operator API: the same token and host rules as /jobs."""
+        try:
+            row = distillations.create(session, distillation_id=body.distillation_id, spec=body.spec, seeds_jsonl=body.seeds_jsonl,
+                                       enabled=settings.distillation_enabled)
+        except distillations.Refused as exc:
+            raise HTTPException(status_code=exc.status, detail=exc.detail) from None
+        return {"job_id": row.job_id}
+
     @app.post("/jobs", status_code=201)
     def create_job(body: CreateJobRequest, session: Session = Depends(get_session), idempotency_key: str | None = Header(default=None)) -> Any:
         # Refused here, not on a provider after the client has paid. Verifiers only need the policy if they're running.
@@ -562,6 +583,14 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
             app.state.bus.publish(event)
         return job_view(job)
 
+    @app.post("/jobs/{job_id}/erase-key")
+    def erase_job_key(job_id: str, session: Session = Depends(get_session)) -> dict[str, Any]:
+        """Destroy a finished job's encryption key (the customer deleted their data). Operator API, called by the Platform's
+        erasure worker. A job that is still running is refused: destroying its key would break the run; ask again once it has ended."""
+        job = load_job(session, job_id)
+        if job.state not in job_keys.ENDED_JOB_STATES:
+            raise HTTPException(status_code=409, detail="this job has not ended; its key can be destroyed after it has")
+        return {"job_id": job.id, "state": job.state, "destroyed": job_keys.destroy(session, job.id)}
     @app.get("/jobs/{job_id}/timeline")
     def timeline(job_id: str, after: int = 0, session: Session = Depends(get_session)) -> list[dict[str, Any]]:
         load_job(session, job_id)

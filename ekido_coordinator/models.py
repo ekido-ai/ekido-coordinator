@@ -385,3 +385,17 @@ class IndexCursor(Base):
     name: Mapped[str] = mapped_column(String(64), primary_key=True)
     block: Mapped[int] = mapped_column(BigInteger)
 
+
+class DistillationJob(Base):
+    """One example-generation request (ticket #154, contract distill-gen/v1). The seeds are customer text and are dropped when the job ends."""
+
+    __tablename__ = "distillation_jobs"
+    __table_args__ = (UniqueConstraint("distillation_id", "attempt", name="uq_distillation_attempt"),)
+    job_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    distillation_id: Mapped[str] = mapped_column(String(64), index=True)
+    attempt: Mapped[int] = mapped_column(Integer)
+    state: Mapped[str] = mapped_column(String(16), index=True)
+    spec: Mapped[dict] = mapped_column(JSON)
+    spec_sha256: Mapped[str] = mapped_column(String(64))
+    seeds_jsonl: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
