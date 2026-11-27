@@ -55,12 +55,15 @@ class EvaluationTask:
 class QuorumQuality:
     """Implements QualityLink. evaluate() blocks a worker thread until the verifiers decide."""
 
-    def __init__(self, verifiers: set[str], quorum: int, timeout_seconds: float = 300.0):
+    def __init__(self, verifiers: set[str], quorum: int, timeout_seconds: float = 300.0, final_timeout_seconds: float | None = None):
         if quorum < 1 or quorum > len(verifiers):
             raise ValueError("quorum must be between 1 and the number of verifiers")
         self.verifiers = {v.lower() for v in verifiers}
         self.quorum = quorum
         self.timeout = timeout_seconds
+        # The final check scores a whole test set, on a CPU if the verifiers have no GPU, so it can be given longer than
+        # the checks that recovery waits on.
+        self.final_timeout = final_timeout_seconds or timeout_seconds
         self.tasks: dict[str, EvaluationTask] = {}
         self.decided_reports: dict[tuple[str, str], list[dict]] = {}  # (job, checkpoint) -> signed reports.
         self.lock = threading.Lock()
@@ -72,9 +75,10 @@ class QuorumQuality:
         with self.lock:
             self.tasks[task.task_id] = task
         try:
-            if not task.done.wait(self.timeout):
+            timeout = self.final_timeout if is_final else self.timeout
+            if not task.done.wait(timeout):
                 # Never treat missing verifiers as a pass. Payment depends on this answer.
-                raise QualityTimeout(f"no quorum for {checkpoint_hash} within {self.timeout:.0f}s")
+                raise QualityTimeout(f"no quorum for {checkpoint_hash} within {timeout:.0f}s")
             return task.decision or "FAIL"
         finally:
             with self.lock:

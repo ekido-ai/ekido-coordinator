@@ -572,6 +572,33 @@ class QualityGuard(Fixture):
         self.assertEqual(self.quality.calls[-1][2], True)
         self.assertEqual(self.events("checkpoint.accepted")[-1]["data"]["step"], 300)
 
+    def test_a_final_check_with_no_quorum_is_asked_again(self):
+        self.started_job()
+        self.checkpoint(300, self.A)
+        answer = self.quality.evaluate
+        self.quality.evaluate = lambda *a, **k: (_ for _ in ()).throw(TimeoutError("no quorum"))
+        self.assertEqual(self.orch.on_run_finished(self.job_id, 1), "VALIDATING")
+        self.assertEqual(self.orch.pending_evaluations(), [self.job_id])
+        self.quality.evaluate = answer
+        self.assertEqual(self.orch.evaluate_final(self.job_id), "COMPLETED")
+        self.assertEqual(self.orch.pending_evaluations(), [])
+        calls = len(self.quality.calls)
+        self.assertEqual(self.orch.evaluate_final(self.job_id), "COMPLETED")  # a finished job is left alone
+        self.assertEqual(len(self.quality.calls), calls)
+
+    def test_a_job_being_checked_is_not_checked_twice(self):
+        self.started_job()
+        self.checkpoint(300, self.A)
+        inside = []
+
+        def evaluate(job_id, *args, **kwargs):
+            inside.append(self.orch.evaluate_final(job_id))  # a sweep that arrives while the verifiers are still working
+            return "PASS"
+
+        self.quality.evaluate = evaluate
+        self.assertEqual(self.orch.on_run_finished(self.job_id, 1), "COMPLETED")
+        self.assertEqual(inside, ["VALIDATING"])
+
     def test_provider_saying_finished_is_not_enough(self):
         self.started_job()
         # No final checkpoint: the claim proves nothing, so the job goes to recovery rather than completing.

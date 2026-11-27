@@ -90,6 +90,7 @@ class Settings(BaseSettings):
     max_pending_upload_bytes: int = 2 * 1024**3
     verifier_addresses: str = ""  # Comma-separated. Empty means no quality gate, so jobs stop at VALIDATING.
     verifier_quorum: int = 2
+    final_evaluation_timeout_seconds: float = 1800.0  # how long one asking of the final check waits for a quorum
     # Chain settings. With no RPC_URL or ESCROW_ADDRESS, the coordinator runs with no chain.
     rpc_url: str = ""
     chain_id: int = 84532
@@ -271,7 +272,8 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
     store = ArtifactStore(Path(settings.artifact_dir))
     blobs = S3Blobs(settings.artifact_s3_bucket, region=settings.artifact_s3_region or None) if settings.artifact_s3_bucket else None
     if quality is None and settings.verifier_addresses:
-        quality = QuorumQuality({a.strip() for a in settings.verifier_addresses.split(",") if a.strip()}, settings.verifier_quorum)
+        quality = QuorumQuality({a.strip() for a in settings.verifier_addresses.split(",") if a.strip()}, settings.verifier_quorum,
+                                final_timeout_seconds=settings.final_evaluation_timeout_seconds)
     # Must come after quality is set: the gateway builds its orchestrator immediately.
     job_keys.configure(job_keys.make_wrapper(settings.job_key_wrap, key_id=settings.kms_key_id, region=settings.kms_region, local_identity=settings.local_wrap_identity))
     gateway = AgentGateway(engine, lambda link: Orchestrator(engine, bus, link, quality))
@@ -372,8 +374,21 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
                     logging.getLogger(__name__).exception("fiat settlement sweep failed")
 
         sweeper = asyncio.create_task(fiat_sweeper()) if fiat is not None else None
+
+        async def evaluation_sweeper() -> None:
+            while True:  # asks again about jobs whose final check got no quorum, or that a restart interrupted
+                await asyncio.sleep(60)
+                try:
+                    for job_id in await asyncio.to_thread(gateway.orchestrator.pending_evaluations):
+                        await asyncio.to_thread(gateway.orchestrator.evaluate_final, job_id)
+                except Exception:
+                    logging.getLogger(__name__).exception("final evaluation sweep failed")
+
+        evaluator = asyncio.create_task(evaluation_sweeper()) if quality is not None else None
         yield
         monitor.cancel()
+        if evaluator is not None:
+            evaluator.cancel()
         if sweeper is not None:
             sweeper.cancel()
 
