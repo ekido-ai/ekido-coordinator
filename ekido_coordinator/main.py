@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import logging
 import os
@@ -140,6 +141,12 @@ class UploadUrlRequest(StrictModel):
 class VerifierSessionRequest(StrictModel):
     message: dict[str, Any]
     signature: str
+
+
+class VerifierJobKeyRequest(StrictModel):
+    address: str
+    job_id: str
+    recipient: str  # a one-off age public key the verifier made for this task
 
 
 class ClaimTaskRequest(StrictModel):
@@ -933,6 +940,18 @@ def create_app(settings: Settings | None = None, engine: Engine | None = None, q
             "expected_signer": candidate.signer,
         }
 
+    @app.post("/verifier/tasks/job-key")
+    def verifier_job_key(body: VerifierJobKeyRequest, session: Session = Depends(get_session), authorization: str | None = Header(default=None)) -> dict[str, Any]:
+        """The job's key for a verifier that holds a claimed evaluation of this job, encrypted to the recipient it names. Needs a signed
+        verifier session; being on the allowlist is not enough (a verifier gets the key only for work it was handed)."""
+        require_verifier_session(body.address, authorization)
+        if not isinstance(quality, QuorumQuality) or not quality.is_working_on(body.address, body.job_id):
+            raise HTTPException(status_code=403, detail="NOT_ASSIGNED: this verifier has no claimed evaluation of this job")
+        try:
+            sealed = job_keys.release_to_verifier(session, job_id=body.job_id, verifier_recipient=body.recipient)
+        except job_keys.KeyRefused as refusal:
+            raise HTTPException(status_code=409, detail=f"KEY_REFUSED: {refusal.code}") from None
+        return {"ciphertext_b64": base64.b64encode(sealed).decode("ascii")}
     @app.post("/verifier/verdicts/claim")
     def claim_verdict(body: ClaimTaskRequest, authorization: str | None = Header(default=None)) -> dict[str, Any] | None:
         require_verifier_session(body.address, authorization)
